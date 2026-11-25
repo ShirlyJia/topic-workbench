@@ -5,7 +5,7 @@
 ## 本地启动
 
 ```sh
-git clone --branch topic-workbench-source --single-branch https://github.com/ShirlyJia/ShirlyJia.github.io.git topic-workbench-source
+git clone --branch topic-workbench-source --single-branch https://github.com/ShirlyJia/topic-workbench.git topic-workbench-source
 cd topic-workbench-source
 python3 -m http.server 8767 --bind 127.0.0.1
 ```
@@ -22,4 +22,4 @@ python3 -m http.server 8767 --bind 127.0.0.1
 
 使用 Node.js 22 或更新版本运行 `npm test`，无需 `npm install`。
 
-当前线上站点仍由 `main` 的 `topic-workbench/` 发布。推送本源码分支不会部署到线上。此分支不包含实际画板数据、飞书原始资料或本机发布服务的配置与凭证。
+当前线上站点由独立仓库 `main` 的根目录发布。推送本源码分支不会部署到线上。此分支不包含实际画板数据、飞书原始资料或本机发布服务的配置与凭证。
