@@ -1,7 +1,7 @@
 export const SYNC_ORIGIN = 'http://127.0.0.1:8768';
-const REF_URL = 'https://api.github.com/repos/ShirlyJia/ShirlyJia.github.io/git/ref/heads/topic-board-data';
-const RAW_REPO = 'https://raw.githubusercontent.com/ShirlyJia/ShirlyJia.github.io/';
-const BOARD_PATH = '/topic-workbench/live-board.json';
+const REF_URL = 'https://api.github.com/repos/ShirlyJia/topic-workbench/git/ref/heads/topic-board-data';
+const RAW_REPO = 'https://raw.githubusercontent.com/ShirlyJia/topic-workbench/';
+const BOARD_PATH = '/live-board.json';
 let pinned, nextRefCheck=0;
 const isRevision = value => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
 const nextWriteId = () => crypto.randomUUID().replaceAll('-','');
