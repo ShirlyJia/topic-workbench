@@ -29,6 +29,7 @@
   <link rel="stylesheet" href="canvas-navigation.css?v=20261102-pan-fit">
   <link rel="stylesheet" href="date-styles.css?v=20261030-dates">
   <link rel="stylesheet" href="workspace-header.css?v=20261125-autosave">
+  <link rel="stylesheet" href="workspace-account.css?v=20261126-account">
   <link rel="stylesheet" href="project-lifecycle.css?v=20261113-frozen-style">
   <link rel="stylesheet" href="viewer-mode.css?v=20261117">
   <link rel="stylesheet" href="action-board.css?v=20261123-action-focus">
@@ -65,6 +66,7 @@
         <button type="button" id="reviewIssues" class="plain-button" title="待核对" aria-label="待核对"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 17V4m0 1c3-3 6 2 10 0v7c-4 2-7-3-10 0"/></svg><span>待核对</span></button>
         <button type="button" id="help" class="plain-button" title="操作说明与快捷键" aria-label="帮助"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M8 8a2 2 0 1 1 3 1.6c-.7.4-1 .9-1 1.9m0 2.6h.01"/></svg></button>
       </div>
+      <div id="workspaceAccount" class="workspace-account"></div>
     </div>
   </header>
   <p id="loadCaption" class="load-caption" role="status">正在载入项目…</p>
@@ -168,5 +170,6 @@
 }
   </script>
   <script type="module" src="app.js?v=20261126-assignee"></script>
+  <script type="module" src="workspace-account.js?v=20261126-account"></script>
 </body>
 </html>

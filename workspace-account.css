@@ -1,0 +1,19 @@
+.workspace-account{display:flex;align-items:center;flex:none}
+.account-trigger{display:flex;align-items:center;gap:6px;min-height:30px;max-width:136px;padding:3px 6px;border-radius:6px;font-size:12px;color:#5d6065}
+.account-trigger:hover,.account-trigger[aria-expanded="true"]{background:#f2f3f5;color:#37352f}
+.account-trigger-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-avatar{position:relative;display:inline-grid;place-items:center;flex:none;width:22px;height:22px;overflow:hidden;border-radius:50%;background:#ecf0f7;color:#526884;font-size:11px;font-weight:650;line-height:1}
+.account-avatar svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.45;stroke-linecap:round}
+.account-avatar img{position:absolute;inset:0;width:100%;height:100%;border-radius:inherit;object-fit:cover}
+.account-menu{box-sizing:border-box;position:fixed;inset:0 10px auto auto;width:min(248px,calc(100vw - 20px));padding:12px;margin:0;border:1px solid #e3e4e7;border-radius:8px;background:#fff;color:#37352f;box-shadow:0 10px 30px #25324d17}
+.account-summary{display:flex;align-items:center;gap:9px;margin:2px 2px 10px;font-size:14px;font-weight:620}
+.account-summary .account-avatar{width:34px;height:34px;font-size:15px}
+.account-identity{display:grid;gap:3px;min-width:0}
+.account-identity strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.account-identity span{color:#767a82;font-size:11px;font-weight:450}
+.account-message{margin:0 2px 8px;color:#9b5841;font-size:12px;line-height:1.5}
+.account-action{width:100%;min-height:32px;padding:5px 9px;border-radius:5px;background:#f2f3f5;text-align:left;font-size:12px}
+.account-action:hover:not(:disabled){background:#e9ebef}
+.account-action.sign-in{background:#eef3ff;color:#355989}
+.account-action.sign-in:hover:not(:disabled){background:#e4edff}
+@media(max-width:660px){.account-trigger{padding:3px}.account-trigger-label{display:none}}
