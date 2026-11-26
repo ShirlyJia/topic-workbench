@@ -1,5 +1,5 @@
 import {applyViewerMode,removeRetiredSession} from './viewer-mode.js';
-import {buildSearchIndex,matchesKeywords} from './global-search.js';
+import {buildSearchIndex,matchesKeywords} from './global-search.js?v=20261126-assignee';
 import {mountGlobalSearch} from './global-search-view.js';
 import {createMeetingStore,loadMeetingStore} from './meetings.js?v=20261117-global-search';
 import {createCanvasEditor} from './canvas-editor.js?v=20261030-detail';
@@ -17,7 +17,7 @@ import { detachSourceMetadata } from './source-detach.js';
 import { displayPriority, visibleNodes, nodeStatus, displayDescription } from './presentation.js';
 import {boardPublication, deployment, storageKey, useBoardEdition} from './deployment-config.js?v=20261105-editions';
 import {showBoardCopies} from './board-publication.js';
-import {isOlderThanLiveBaseline, loadSharedBoard, mountAutoSync, newerSharedBoard, prepareLiveStorage, readLiveBaseline, validateRelease, watchSharedBoard} from './auto-sync.js?v=20261125-workbench-repo';
+import {SYNC_ORIGIN,isOlderThanLiveBaseline, loadSharedBoard, mountAutoSync, newerSharedBoard, prepareLiveStorage, readLiveBaseline, validateRelease, watchSharedBoard} from './auto-sync.js?v=20261125-workbench-repo';
 import {richEditorMarkup, mountRichEditors, readRichEditor, richHTML, richHasContent, flushRichEditors, destroyRichEditors} from './rich-text.js?v=20261030-card-preview';
 import {frozenNote,saveFrozenNote} from './frozen-note.js';
 import {freezeCommentPickerMarkup,mountFreezeCommentPickers} from './freeze-comment-picker.js';
@@ -37,6 +37,7 @@ import {applyProfessionalColors, colorPickerMarkup, installColorPickers} from '.
 import {moveFramesToEdge} from './frame-layers.js';
 import {orderedTags,renameTag,moveTag,tagFilterMarkup,tagProjectCounts,mountTagEditor} from './tag-editor.js?v=20261030-tag-counts';
 import {mountProjectTagPicker,projectTagTriggerMarkup,projectTagNameKey} from './project-tag-picker.js?v=20261124-tag-picker';
+import {assigneeMarkup,assigneeFieldMarkup,lookupFeishuAssignees,mountAssigneePicker} from './project-assignee.js?v=20261126-assignee';
 import {referenceLinesMarkup, clonePlacement, removePlacement} from './canvas-references.js?v=20261102-remove-reference';
 import {fitCardPreviews} from './card-preview.js?v=20261030-two-line-previews';
 import {createProjectList} from './project-list.js?v=20261030-grouped-list';
@@ -169,7 +170,7 @@ function cardMarkup(p,{instance,showCategoryTags}){
     '<button type="button" class="card-copy" data-copy-instance="'+esc(instance.id)+'" data-hint="复制到画板" aria-keyshortcuts="Control+D Meta+D" aria-label="复制'+esc(p.name)+'到画板"><svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M13 5V3H3v10h2"/></svg></button>'+
     '<button type="button" class="card-remove-reference" data-remove-instance="'+esc(instance.id)+'" data-hint="移除此处引用" aria-label="移除此处引用"><svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M6.5 10h7" stroke-linecap="round"/></svg></button></div>':'';
   return childBadgeMarkup(children.length,p.id,{expandable,expanded})+(eyebrow||instance?.focus?'<div class="card-eyebrow">'+eyebrow+(instance?.focus?'<span class="focus-mark">★ 本处重点</span>':'')+'</div>':'')+'<div class="card-heading">'+pageIcon+'<h3 class="card-title">'+esc(p.name)+'</h3>'+actions+'<button class="detail-arrow" data-open="'+esc(p.id)+'" aria-label="查看'+esc(p.name)+'详情">↗</button></div>'+
-  parentCardMarkup(p.id,state,{preferredParent:focusedDirection?.rows.find(row=>row.project.id===p.id)?.parent.id})+'<div class="card-tags">'+priorityControl(p,true)+categoryTags+'</div>'+
+  parentCardMarkup(p.id,state,{preferredParent:focusedDirection?.rows.find(row=>row.project.id===p.id)?.parent.id})+'<div class="card-tags">'+priorityControl(p,true)+assigneeMarkup(p.assignee)+categoryTags+'</div>'+
   (p.description?'<p class="card-note">'+esc(displayDescription(p.description))+'</p>':'')+
   deliveryCardMarkup(p)+(node?.owner&&!node.targetDate&&!node.estimatedDate?'<div class="card-footer">'+esc(node.owner)+'</div>':'')+
   ((projectInstances(p.id).length>1||instance?.context)?'<div class="card-reference">'+(projectInstances(p.id).length>1?'<span>'+projectInstances(p.id).length+' 处引用</span>':'')+(instance?.context?'<span title="'+esc(instance.context)+'">有本处备注</span>':'')+'</div>':'')+(expanded?childTreeMarkup(children):'');
@@ -625,7 +626,7 @@ function openDetail(pid,instanceId=null,resetScroll=true,{keepTrail=false}={}){
   const parentHint=parentProjectHintMarkup(p.id,state);
   let html='<div class="detail-title-tools"><div class="detail-kind-row"><label class="kind-select"><select data-inline="kind" aria-label="项目类型"><option value="project"'+(p.kind!=='direction'?' selected':'')+'>项目</option><option value="direction"'+(p.kind==='direction'?' selected':'')+'>长期方向</option></select></label>'+(parentHint?'<span class="detail-child-label">子项目</span>':'')+'</div>'+navigation+'</div>';
   html+=parentHint+'<div class="project-title-editor">'+inlineText('name','项目标题',p.name,{title:true,rows:1,autogrow:true})+'<button type="button" data-edit-project-title aria-label="修改项目标题">✎ 改标题</button></div>';
-  html+='<div class="detail-edit-properties"><label><span>优先级</span>'+priorityControl(p)+'</label><label class="free-status"><span>结果状态</span><input class="inline-input" data-inline="outcome" aria-label="结果状态" value="'+esc(p.outcome||'')+'" placeholder="自由填写"></label><label class="lifecycle-control"><span>项目状态</span><select data-project-lifecycle aria-label="项目状态">'+Object.entries(lifecycleLabels).map(([value,label])=>'<option value="'+value+'"'+(projectLifecycle(p)===value?' selected':'')+'>'+label+'</option>').join('')+'</select></label></div>';
+  html+='<div class="detail-edit-properties"><label><span>优先级</span>'+priorityControl(p)+'</label>'+assigneeFieldMarkup(p.assignee,maintainer)+'<label class="free-status"><span>结果状态</span><input class="inline-input" data-inline="outcome" aria-label="结果状态" value="'+esc(p.outcome||'')+'" placeholder="自由填写"></label><label class="lifecycle-control"><span>项目状态</span><select data-project-lifecycle aria-label="项目状态">'+Object.entries(lifecycleLabels).map(([value,label])=>'<option value="'+value+'"'+(projectLifecycle(p)===value?' selected':'')+'>'+label+'</option>').join('')+'</select></label></div>';
   html+=flowMarkup(p)+lifecycleLog(p);
   const deliverySummary=deliveryCardMarkup(p);if(deliverySummary)html+='<div class="detail-delivery-summary">'+deliverySummary+'<button type="button" data-delivery-plan-jump>查看交付计划 ↓</button></div>';
   html+=(maintainer||p.tagIds.length)?'<div class="detail-tags">'+detailTagContents(p,maintainer)+'</div>':'';
@@ -966,6 +967,19 @@ function editProjectTags(pid,{id,name,selected=true}){
 }
 function bindEvents(){
 installColorPickers();
+if(canMaintain())mountAssigneePicker({
+  root:$('detailBody'),
+  getProject:()=>canMaintain()&&!$('detail').hidden?byId[state.detail]:null,
+  beforeOpen:flushInline,
+  lookup:(query,signal)=>lookupFeishuAssignees(SYNC_ORIGIN, cloudSync?.connection(), query, signal),
+  assign:(pid,person)=>{
+    if(state.detail!==pid||!flushInline())return false;
+    return mutate(()=>{
+      if(person)byId[pid].assignee=person;
+      else delete byId[pid].assignee;
+    },'',{rollbackOnSaveFailure:true});
+  }
+});
 projectTagPicker=mountProjectTagPicker({root:$('detail'),getProject:()=>canMaintain()&&!$('detail').hidden?byId[state.detail]:null,getTags:()=>state.tagDefinitions,edit:editProjectTags});
 tagEditor=mountTagEditor({bar:$('tags'),rows:$('tagRows'),getTags:()=>state.tagDefinitions,
   saveName:(id,name)=>{if(!flushInline())return false;return mutate(()=>state.tagDefinitions=renameTag(state.tagDefinitions,id,name),'',{rollbackOnSaveFailure:true});},

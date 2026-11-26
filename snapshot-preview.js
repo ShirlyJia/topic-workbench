@@ -1,3 +1,4 @@
+import {assigneeMarkup} from './project-assignee.js?v=20261126-assignee';
 import {orderedComments} from './comment-order.js';
 import {readProjectFlow} from './project-flow.js';
 import {isClosedProject} from './workbench-model.js';
@@ -58,9 +59,10 @@ function tagsHTML(project, tagById) {
 }
 
 function metadataHTML(project) {
+  const assignee = assigneeMarkup(project.assignee);
   const values = [['类型',project.kind === 'direction' ? '方向' : ''],['优先级',project.priority],['状态',project.status],['结果状态',project.outcome],['结束日期',isClosedProject(project)?project.closedAt:'',true]];
   const fields = values.filter(([,value]) => present(value));
-  return fields.length ? `<dl class="snapshot-meta">${fields.map(([label,value,isDate]) => `<div><dt>${esc(label)}</dt><dd>${isDate?`<time>${esc(value)}</time>`:esc(value)}</dd></div>`).join('')}</dl>` : '';
+  return (fields.length || assignee) ? `<dl class="snapshot-meta">${assignee ? `<div><dt>负责人</dt><dd>${assignee}</dd></div>` : ''}${fields.map(([label,value,isDate]) => `<div><dt>${esc(label)}</dt><dd>${isDate?`<time>${esc(value)}</time>`:esc(value)}</dd></div>`).join('')}</dl>` : '';
 }
 
 // Keep the preview defensive: old snapshots may omit annotations, and an

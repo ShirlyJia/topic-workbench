@@ -1,3 +1,4 @@
+import {assigneeMarkup} from './project-assignee.js?v=20261126-assignee';
 import {isHistoryProject,lifecycleLabels,projectLifecycle} from './project-lifecycle.js';
 import {DEFAULT_HISTORY_FILTER,resultsTimelineMarkup} from './results-timeline.js';
 import {mountRichEditors, flushRichEditors, destroyRichEditors} from './rich-text.js?v=20261030-card-preview';
@@ -151,7 +152,7 @@ export function createWorkbenchViews(api) {
       '<textarea class="inline-text" data-board-context="'+id+'" data-pid="'+pid+'" aria-label="'+name+'在此看板的备注" title="'+note+'" placeholder="添加备注…" rows="2">'+esc(context)+'</textarea></div>';
     const noteReader=note?'<details class="board-context-reader"><summary aria-label="查看本板备注" title="'+note+'"><span>'+note+'</span><span class="board-context-collapse">收起备注</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6 3 3 3-3"/></svg></summary><p>'+note+'</p></details>':'';
     return '<div class="board-ledger-row'+(emphasized?' emphasized':'')+(frozen?' frozen':'')+'" role="row" data-project-highlight="'+pid+'" style="--board-color:'+esc(board.color)+'">'+
-      '<div class="board-ledger-project" role="cell"><div class="board-ledger-title"><button type="button" data-project-open="'+pid+'" title="'+name+'">'+name+'</button>'+marker+
+      '<div class="board-ledger-project" role="cell"><div class="board-ledger-title"><button type="button" data-project-open="'+pid+'" title="'+name+'">'+name+'</button>'+marker+assigneeMarkup(project.assignee)+
       (frozen?'<span class="lifecycle-badge frozen">'+lifecycleLabels.frozen+'</span>':'')+(emphasized?'<span class="board-ledger-pin" role="img" aria-label="本板重点" title="本板重点">★</span>':'')+'</div></div>'+
       '<div class="board-ledger-priority" role="cell">'+(editable?priorityControl(project,true,'—'):priority?'<span class="priority" data-priority="'+esc(priority)+'">'+esc(priority)+'</span>':'')+'</div>'+
       '<div class="board-ledger-plan" role="cell">'+plan+'</div>'+

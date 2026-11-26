@@ -23,7 +23,7 @@ export function buildSearchIndex(data, meetings=[]) {
     const groups=frames.filter(f=>f.members?.some(id=>copyIds.has(id))).map(f=>f.name);
     const linkedBoards=boards.filter(b=>b.projectIds?.includes(p.id));
     const parents=(data.relations||[]).filter(r=>r.child===p.id).map(r=>projects.get(r.main)?.name).filter(Boolean);
-    const parts=[segment('标题',p.name,'',8),segment('分类标签',(p.tagIds||[]).map(id=>tags.get(id)).filter(Boolean).join(' '),'',4),segment('分组',[...groups,...linkedBoards.map(b=>b.name)].join(' '),'',3),segment('主方向',parents.join(' '),'relations',3)];
+    const parts=[segment('标题',p.name,'',8),segment('负责人',p.assignee?.name,'',4),segment('分类标签',(p.tagIds||[]).map(id=>tags.get(id)).filter(Boolean).join(' '),'',4),segment('分组',[...groups,...linkedBoards.map(b=>b.name)].join(' '),'',3),segment('主方向',parents.join(' '),'relations',3)];
     for(const [field,label,section] of [['description','问题陈述','description'],['result','结论','result'],['impact','影响','result'],['outcome','结果状态','result'],['freezeReason','冻结原因','disposition'],['terminationReason','终止原因','disposition'],['resumeCondition','恢复条件','disposition']])parts.push(segment(label,p.richText?.[field]||p[field],section));
     parts.push(segment('优先级',p.priority),segment('项目状态',({frozen:'Frozen 冻结',completed:'已完成 已结束',terminated:'已终止',active:'推进中'})[p.lifecycle]||p.status));
     for(const c of p.comments||[])parts.push(segment('评论',[c.author,c.richText?.body||c.body].filter(Boolean).join(' '),'comments',2));
