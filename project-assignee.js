@@ -1,59 +1,88 @@
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const assigneeNameLimit = 80;
+const refPattern = /^[a-f0-9]{32}$/;
+const nameKey = name => name.trim().normalize('NFKC').toLocaleLowerCase();
+const named = person => typeof person?.name === 'string' && person.name.trim() && person.name.length <= assigneeNameLimit;
 
 export function isAssigneeAvatar(value) {
   return typeof value === 'string' && value.length <= 32800 &&
     /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value);
 }
 
+export function projectAssignees(project) {
+  return Array.isArray(project?.assignees) ? project.assignees.filter(named) : named(project?.assignee) ? [project.assignee] : [];
+}
+
 export function assigneeMarkup(person) {
-  if (typeof person?.name !== 'string' || !person.name.trim()) return '';
-  const initial = [...person.name.trim()][0]?.toLocaleUpperCase() || '·';
-  return `<span class="project-assignee" title="负责人 · ${esc(person.name)}"><span class="assignee-avatar" aria-hidden="true">${esc(initial)}${isAssigneeAvatar(person.avatar) ? `<img src="${person.avatar}" alt="" loading="lazy" width="24" height="24">` : ''}</span><span class="assignee-name">${esc(person.name)}</span></span>`;
+  if (!named(person)) return '';
+  const initial = [...person.name.trim()][0].toLocaleUpperCase();
+  return '<span class="project-assignee" title="'+esc(person.name)+'"><span class="assignee-avatar" aria-hidden="true">'+esc(initial)+
+    (isAssigneeAvatar(person.avatar) ? '<img src="'+person.avatar+'" alt="" loading="lazy" width="24" height="24">' : '')+
+    '</span><span class="assignee-name">'+esc(person.name)+'</span></span>';
 }
 
-export function assigneeFieldMarkup(person, editable) {
-  if (!editable && !person?.name) return '';
-  const badge = assigneeMarkup(person);
-  const value = editable ? `<button type="button" data-assignee-trigger aria-haspopup="dialog" aria-label="${person?.name ? `更换负责人 · ${esc(person.name)}` : '选择负责人'}">${badge || '<span class="assignee-empty">＋ 选择</span>'}</button>` : badge;
-  return `<div class="detail-assignee-field"><span>负责人</span>${value}</div>`;
+export function assigneeListMarkup(people, limit=2) {
+  if (!people.length) return '';
+  const rest = people.length-limit;
+  return '<span class="assignee-list" title="'+esc(people.map(person=>person.name).join('、'))+'">'+
+    people.slice(0,limit).map(assigneeMarkup).join('')+
+    (rest>0?'<span class="assignee-more" aria-label="另有 '+rest+' 人">+'+rest+'</span>':'')+'</span>';
 }
 
-export async function lookupFeishuAssignees(origin, connection, query, signal) {
+export function assigneeFieldMarkup(people, editable) {
+  if (!editable && !people.length) return '';
+  const label = people.length ? '编辑负责人 · '+people.map(person=>person.name).join('、') : '选择负责人';
+  const badges = assigneeListMarkup(people,editable?2:Infinity);
+  const value = editable ? '<button type="button" data-assignee-trigger aria-haspopup="dialog" aria-label="'+esc(label)+'">'+
+    (badges || '<span class="assignee-empty">＋ 选择</span>')+'</button>' : badges;
+  return '<div class="detail-assignee-field"><span>负责人</span>'+value+'</div>';
+}
+
+async function directoryRequest(origin, connection, url, signal, timeout) {
   if (!connection) throw Error('连接这台 Mac 后可搜索飞书同事。');
-  const url = new URL('/assignees', origin);
-  url.searchParams.set('query', query);
+  const timer = AbortSignal.timeout(timeout);
   let response;
   try {
-    response = await fetch(url, {cache:'no-store', headers:{Authorization:'Bearer '+connection},
-      signal:AbortSignal.any([signal, AbortSignal.timeout(16500)])});
+    response = await fetch(new URL(url,origin), {cache:'no-store',headers:{Authorization:'Bearer '+connection},
+      signal:signal?AbortSignal.any([signal,timer]):timer});
   } catch (error) {
-    if (signal.aborted) throw error;
+    if (signal?.aborted) throw error;
     throw Error('暂时连不上本机飞书通讯录。');
   }
   const result = await response.json().catch(() => null);
-  if (!response.ok || !Array.isArray(result?.people)) throw Error(result?.error || '暂时无法搜索飞书同事。');
+  if (!response.ok || !result) throw Error(result?.error || '暂时无法搜索飞书同事。');
   return result;
 }
 
-export function mountAssigneePicker({root, getProject, beforeOpen, lookup, assign}) {
+export function lookupFeishuAssignees(origin, connection, query, signal) {
+  return directoryRequest(origin,connection,'/assignees?'+new URLSearchParams({query}),signal,8000);
+}
+
+export async function lookupFeishuAvatars(origin, connection, refs) {
+  const query = new URLSearchParams(refs.map(ref=>['ref',ref]));
+  const {avatars} = await directoryRequest(origin,connection,'/assignees/avatars?'+query,null,11500);
+  return avatars || {};
+}
+
+export function mountAssigneePicker({root, getProject, knownPeople, beforeOpen, lookup, lookupAvatars, assign, updateAvatars}) {
   const dialog = document.createElement('dialog');
   dialog.className = 'assignee-dialog';
   dialog.setAttribute('aria-labelledby','assignee-dialog-title');
-  dialog.innerHTML = `<header><h2 id="assignee-dialog-title">负责人</h2><button type="button" data-assignee-close aria-label="关闭负责人选择">×</button></header>
-    <div class="assignee-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5"/><path d="m12 12 4 4"/></svg><input type="search" aria-label="搜索飞书姓名" placeholder="搜索飞书姓名，或直接填写" autocomplete="off" spellcheck="false" maxlength="${assigneeNameLimit}"></div>
-    <div class="assignee-options" aria-label="飞书搜索结果"></div><p class="assignee-status" role="status" hidden></p>
-    <button class="assignee-manual" data-assignee-manual type="button" hidden></button>
-    <footer><button class="assignee-clear" data-assignee-clear type="button" hidden>移除负责人</button></footer>`;
+  dialog.innerHTML = '<header><h2 id="assignee-dialog-title">负责人</h2><span class="assignee-count"></span><button type="button" data-assignee-close aria-label="取消选人">×</button></header>'+
+    '<div class="assignee-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5"/><path d="m12 12 4 4"/></svg><input type="search" aria-label="搜索飞书姓名" placeholder="搜索姓名，或手动添加" autocomplete="off" spellcheck="false" maxlength="'+assigneeNameLimit+'"></div>'+
+    '<div class="assignee-picked" aria-label="已选负责人" hidden></div>'+
+    '<div class="assignee-suggestions" hidden>常用负责人</div><div class="assignee-options" aria-label="可选负责人"></div>'+
+    '<p class="assignee-status" role="status" hidden></p><button class="assignee-manual" data-assignee-manual type="button" hidden></button>'+
+    '<footer><button type="button" data-assignee-close>取消</button><button class="assignee-done" data-assignee-done type="button">完成</button></footer>';
   document.body.append(dialog);
-  const input = dialog.querySelector('input');
-  const options = dialog.querySelector('.assignee-options');
-  const status = dialog.querySelector('[role="status"]');
+  const input = dialog.querySelector('input'), options = dialog.querySelector('.assignee-options');
+  const picked = dialog.querySelector('.assignee-picked'), count = dialog.querySelector('.assignee-count');
+  const suggestions = dialog.querySelector('.assignee-suggestions'), status = dialog.querySelector('[role="status"]');
   const manual = dialog.querySelector('[data-assignee-manual]');
-  const clear = dialog.querySelector('[data-assignee-clear]');
-  let projectId = null, searchTimer, request, people = [], composing = false;
+  const searchCache = new Map(), avatarTasks = new Map(), loadedAvatars = new Map();
+  let projectId = null, searchTimer, request, people = [], selected = [], initial = '', composing = false, personal = [];
 
-  function setStatus(text) {
+  function setStatus(text='') {
     status.textContent = text;
     status.hidden = !text;
   }
@@ -62,77 +91,191 @@ export function mountAssigneePicker({root, getProject, beforeOpen, lookup, assig
     request?.abort();
     request = null;
   }
+  function withAvatar(person) {
+    const avatar = loadedAvatars.get(person.ref) || person.avatar;
+    return {...person,avatar};
+  }
+  function selectedIndex(person) {
+    if (person.ref) {
+      const refIndex = selected.findIndex(item=>item.ref===person.ref);
+      if (refIndex>=0) return refIndex;
+    }
+    const name = nameKey(person.name);
+    const sameName = selected.map((item,index)=>({item,index}))
+      .filter(({item})=>nameKey(item.name)===name && !(person.ref && item.ref));
+    const avatar = withAvatar(person).avatar;
+    const match = avatar && sameName.find(({item})=>withAvatar(item).avatar===avatar);
+    if (match) return match.index;
+    const sameOptions = people.filter(row=>nameKey(row.name)===name);
+    return sameName.length===1 && !sameName[0].item.avatar && sameOptions.length<=1 ? sameName[0].index : -1;
+  }
+  function refreshChecks() {
+    options.querySelectorAll('[data-assignee-choice]').forEach(row=>{
+      row.setAttribute('aria-pressed',String(selectedIndex(people[Number(row.dataset.assigneeChoice)])>=0));
+    });
+  }
+  function renderPicked() {
+    count.textContent = selected.length ? '已选 '+selected.length+' 人' : '';
+    picked.hidden = !selected.length;
+    picked.innerHTML = selected.map((person,index)=>'<button class="assignee-picked-chip" type="button" data-assignee-remove="'+index+
+      '" aria-label="移除 '+esc(person.name)+'">'+assigneeMarkup(withAvatar(person))+'<span aria-hidden="true">×</span></button>').join('');
+    refreshChecks();
+    updateManual();
+  }
+  function updateManual() {
+    const query = input.value.trim();
+    const exists = query && [...people,...selected].some(person=>nameKey(person.name)===nameKey(query));
+    manual.hidden = composing || !query || exists;
+    manual.textContent = query ? '＋ 手动添加「'+query+'」' : '';
+  }
+  function showPeople(rows, showSuggestions=false) {
+    people = rows;
+    suggestions.hidden = !showSuggestions || !rows.length;
+    options.innerHTML = rows.map((person,index)=>'<button class="assignee-option" data-assignee-choice="'+index+
+      '" type="button" aria-pressed="false">'+assigneeMarkup(withAvatar(person))+
+      (person.department ? '<span class="assignee-department" title="'+esc(person.department)+'">'+esc(person.department)+'</span>' : '')+
+      '<span class="assignee-check" aria-hidden="true">✓</span></button>').join('');
+    refreshChecks();
+    updateManual();
+  }
+  function refreshImages() {
+    function refresh(container,rows,key) {
+      container.querySelectorAll('[data-assignee-'+key+']').forEach(el=>{
+        const person = rows[Number(el.getAttribute('data-assignee-'+key))];
+        if (!person || !loadedAvatars.has(person.ref) || el.querySelector('img')) return;
+        el.querySelector('.project-assignee').outerHTML = assigneeMarkup(withAvatar(person));
+      });
+    }
+    if (!dialog.open) return;
+    refresh(options,people,'choice');
+    refresh(picked,selected,'remove');
+    refreshChecks();
+  }
+  function warmAvatars(rows) {
+    const refs = [...new Set(rows.filter(row=>refPattern.test(row.ref || '') && !withAvatar(row).avatar && !avatarTasks.has(row.ref)).map(row=>row.ref))];
+    if (!refs.length) return;
+    const task = lookupAvatars(refs).then(avatars=>{
+      for (const ref of refs) {
+        if (isAssigneeAvatar(avatars[ref])) loadedAvatars.set(ref,avatars[ref]);
+      }
+      while (loadedAvatars.size>160) loadedAvatars.delete(loadedAvatars.keys().next().value);
+      refreshImages();
+    }).catch(()=>{}).finally(()=>refs.forEach(ref=>avatarTasks.delete(ref)));
+    refs.forEach(ref=>avatarTasks.set(ref,task));
+  }
+  function showResult(result,local) {
+    const rows = (Array.isArray(result.people)?result.people:[]).filter(named);
+    const names = new Set(rows.map(person=>nameKey(person.name)));
+    showPeople([...rows,...local.filter(person=>!names.has(nameKey(person.name)))]);
+    setStatus(people.length ? result.notice : '没有找到匹配的飞书同事。');
+    warmAvatars(rows);
+  }
   function queueSearch() {
     cancelSearch();
-    const query = input.value.trim();
-    people = [];
-    options.replaceChildren();
-    manual.hidden = composing || !query;
-    manual.textContent = query ? `手动填写「${query}」` : '';
-    setStatus('');
-    if (composing || !query) return;
-    if ([...query].length > 50) { setStatus('飞书搜索最多支持 50 字。'); return; }
+    const query = input.value.trim(), key = nameKey(query);
+    const local = key?personal.filter(person=>nameKey(person.name).includes(key)):personal;
+    showPeople(local,!key);
+    setStatus();
+    if (composing || !key) return;
+    if ([...query].length > 50) { setStatus('可手动添加完整姓名。'); return; }
+    const cached = searchCache.get(key);
+    if (cached && cached.until>Date.now()) { showResult(cached.result,local); return; }
     searchTimer = setTimeout(async () => {
       const controller = request = new AbortController();
       setStatus('正在搜索飞书同事…');
       try {
-        const result = await lookup(query, controller.signal);
-        if (!dialog.open || request !== controller) return;
-        people = result.people.filter(person => typeof person?.name === 'string' && person.name.trim() && person.name.length <= assigneeNameLimit);
-        options.innerHTML = people.map((person, index) => `<button class="assignee-option" data-assignee-choice="${index}" type="button">${assigneeMarkup(person)}${person.department ? `<span class="assignee-department" title="${esc(person.department)}">${esc(person.department)}</span>` : ''}<small>飞书</small></button>`).join('');
-        setStatus(people.length ? (result.notice || '') : '没有找到匹配的飞书同事。');
+        const result = await lookup(query,controller.signal);
+        if (!dialog.open || request!==controller) return;
+        searchCache.delete(key);
+        searchCache.set(key,{until:Date.now()+120000,result});
+        while (searchCache.size>30) searchCache.delete(searchCache.keys().next().value);
+        showResult(result,local);
       } catch (error) {
-        if (dialog.open && request === controller) setStatus(error.message);
+        if (dialog.open && request===controller) setStatus(error.message);
       }
-    }, 340);
+    }, 220);
   }
-  function choose(person) {
-    if (!projectId || getProject()?.id !== projectId || composing) return;
-    const value = person ? {name:person.name.trim()} : null;
-    if (value && (!value.name || value.name.length > assigneeNameLimit)) return;
-    if (value && isAssigneeAvatar(person.avatar)) value.avatar = person.avatar;
-    if (assign(projectId, value) === false) return;
+  function toggle(person) {
+    if (!named(person) || composing) return;
+    const index = selectedIndex(person);
+    if (index>=0) selected.splice(index,1);
+    else selected.push(withAvatar(person));
+    renderPicked();
+  }
+  function storedPeople(rows) {
+    return rows.map(person=>{
+      const value = {name:person.name.trim()}, avatar = withAvatar(person).avatar;
+      if (isAssigneeAvatar(avatar)) value.avatar = avatar;
+      return value;
+    });
+  }
+  function finishSelection() {
+    if (!projectId || composing || getProject()?.id!==projectId) return;
+    const id = projectId, rows = [...selected], values = storedPeople(rows);
+    if (JSON.stringify(values)!==initial && assign(id,values)===false) return;
     dialog.close();
-    root.querySelector('[data-assignee-trigger]')?.focus({preventScroll:true});
+    const pending = [...new Set(rows.map(person=>avatarTasks.get(person.ref)).filter(Boolean))];
+    if (pending.length) Promise.all(pending).then(()=>{
+      const filled = storedPeople(rows);
+      if (JSON.stringify(filled)!==JSON.stringify(values)) updateAvatars(id,values,filled);
+    });
   }
 
-  root.addEventListener('click', event => {
-    if (!event.target.closest('[data-assignee-trigger]')) return;
+  root.addEventListener('click',event=>{
+    if (!event.target.closest('[data-assignee-trigger]') || dialog.open) return;
     const project = getProject();
-    if (!project || beforeOpen() === false || dialog.open) return;
+    if (!project || beforeOpen()===false) return;
     projectId = project.id;
+    selected = projectAssignees(project).slice();
+    initial = JSON.stringify(storedPeople(selected));
+    personal = knownPeople().filter(named);
     composing = false;
     input.value = '';
-    clear.hidden = !project.assignee?.name;
     queueSearch();
+    renderPicked();
     dialog.showModal();
     input.focus();
   });
-  input.addEventListener('compositionstart', () => { composing = true; queueSearch(); });
-  input.addEventListener('compositionend', () => { composing = false; queueSearch(); });
-  input.addEventListener('input', event => { if (!event.isComposing) queueSearch(); });
-  dialog.addEventListener('keydown', event => {
+  input.addEventListener('compositionstart',()=>{composing=true;queueSearch();});
+  input.addEventListener('compositionend',()=>{composing=false;queueSearch();});
+  input.addEventListener('input',event=>{if (!event.isComposing) queueSearch();});
+  dialog.addEventListener('keydown',event=>{
     event.stopPropagation();
-    if (event.target !== input || event.isComposing || composing) return;
-    if (event.key === 'ArrowDown') {
-      const next = options.querySelector('button') || (!manual.hidden && manual);
-      if (next) { event.preventDefault(); next.focus(); }
+    if (event.isComposing || composing) return;
+    const row = event.target.closest('[data-assignee-choice]');
+    if (event.key==='ArrowDown' || event.key==='ArrowUp') {
+      const next = event.target===input ? options.firstElementChild :
+        event.key==='ArrowDown' ? row?.nextElementSibling : row?.previousElementSibling || (row && input);
+      if (next) {event.preventDefault();next.focus();}
+    }
+    if (event.key==='Enter' && event.target===input) {
+      const next = options.firstElementChild || (!manual.hidden && manual);
+      if (next) {event.preventDefault();next.focus();}
     }
   });
-  dialog.addEventListener('click', event => {
-    if (event.target.closest('[data-assignee-close]')) { dialog.close(); return; }
-    if (event.target.closest('[data-assignee-clear]')) { choose(null); return; }
-    if (event.target.closest('[data-assignee-manual]')) { choose({name:input.value}); return; }
-    const choice = event.target.closest('[data-assignee-choice]');
-    const person = choice && people[Number(choice.dataset.assigneeChoice)];
-    if (person) choose(person);
+  dialog.addEventListener('click',event=>{
+    const action = event.target.closest('button');
+    if (!action) return;
+    if (action.hasAttribute('data-assignee-close')) dialog.close();
+    else if (action.hasAttribute('data-assignee-done')) finishSelection();
+    else if (action.hasAttribute('data-assignee-remove')) {
+      selected.splice(Number(action.dataset.assigneeRemove),1);
+      renderPicked();
+      input.focus();
+    } else if (action.hasAttribute('data-assignee-manual')) {
+      toggle({name:input.value.trim()});
+      input.value = '';
+      queueSearch();
+      input.focus();
+    } else if (action.hasAttribute('data-assignee-choice')) toggle(people[Number(action.dataset.assigneeChoice)]);
   });
-  dialog.addEventListener('close', () => {
+  dialog.addEventListener('close',()=>{
     if (dialog.open) return;
-    composing = false;
     cancelSearch();
     projectId = null;
     people = [];
+    selected = [];
     options.replaceChildren();
+    root.querySelector('[data-assignee-trigger]')?.focus({preventScroll:true});
   });
 }

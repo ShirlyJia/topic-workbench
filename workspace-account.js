@@ -2,6 +2,7 @@ const service = 'https://topic-collaboration-shirly.shirlyjia826.chatgpt.site';
 const sessionKey = 'topic-workbench-account-v1';
 const verifierKey = sessionKey+':verifier';
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
+let verifiedProfile = null, profileToken = '';
 const encode = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');
 const hash = async text => encode(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text))));
 const userIcon = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3"/><path d="M4 16a6 6 0 0 1 12 0"/></svg>';
@@ -21,20 +22,45 @@ function credential() {
   }
 }
 
-async function accountRequest(path,{method='GET',token,body}={}) {
+async function serviceRequest(path,{method='GET',token,body,unavailable='账号验证暂不可用，请稍后重试。'}={}) {
   const headers = {};
   if (token) headers.Authorization = 'Bearer '+token;
   if (body) headers['Content-Type'] = 'application/json';
   let response;
   try {
-    response = await fetch(service+'/api/account/'+path,{method,headers,body:body && JSON.stringify(body),
+    response = await fetch(service+'/api/'+path,{method,headers,body:body && JSON.stringify(body),
       cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(12000)});
   } catch {
-    throw Error('暂时连不上飞书验证服务，请重试。');
+    throw Error(unavailable);
   }
   const result = await response.json().catch(()=>null);
-  if (!response.ok || !result || typeof result!=='object') throw Error(result?.error || '账号验证暂不可用，请稍后重试。');
+  if (!response.ok || !result || typeof result!=='object') throw Error(result?.error || unavailable);
   return result;
+}
+
+const accountRequest = (path,options) => serviceRequest('account/'+path,options);
+
+export function requestWorkbenchComments(path,options) {
+  return serviceRequest(path,{...options,token:credential()?.token,unavailable:'留言暂不可用，请稍后重试。'});
+}
+
+export function currentWorkbenchAccount() {
+  return credential()?.token===profileToken ? verifiedProfile : null;
+}
+
+export function openWorkbenchAccount() {
+  const menu = document.getElementById('workspaceAccountMenu');
+  if (menu?.matches(':popover-open')) menu.querySelector('.account-action')?.focus();
+  else document.querySelector('#workspaceAccount .account-trigger')?.click();
+}
+
+export function feishuAvatarSource(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:' && !url.port && !url.username && !url.password &&
+        /(?:^|\.)(?:feishucdn\.com|larksuitecdn\.com|larkofficeimg\.com|byteimg\.com|bytednsdoc\.com|feishu\.cn)$/i.test(url.hostname)) return url.href;
+  } catch {}
+  return '';
 }
 
 function avatar(user) {
@@ -43,18 +69,15 @@ function avatar(user) {
   picture.setAttribute('aria-hidden','true');
   if (!user) { picture.innerHTML = userIcon; return picture; }
   picture.textContent = [...user.name][0]?.toLocaleUpperCase() || '·';
-  try {
-    const url = new URL(user.avatar);
-    if (url.protocol === 'https:' && !url.port && !url.username && !url.password &&
-        /(?:^|\.)(?:feishucdn\.com|larksuitecdn\.com|larkofficeimg\.com|byteimg\.com|bytednsdoc\.com|feishu\.cn)$/i.test(url.hostname)) {
-      const image = document.createElement('img');
-      image.alt = '';
-      image.referrerPolicy = 'no-referrer';
-      image.addEventListener('error',()=>image.remove(),{once:true});
-      image.src = url.href;
-      picture.append(image);
-    }
-  } catch {}
+  const source = feishuAvatarSource(user.avatar);
+  if (source) {
+    const image = document.createElement('img');
+    image.alt = '';
+    image.referrerPolicy = 'no-referrer';
+    image.addEventListener('error',()=>image.remove(),{once:true});
+    image.src = source;
+    picture.append(image);
+  }
   return picture;
 }
 
@@ -87,6 +110,12 @@ function mountAccount(root) {
     action.textContent = busy || (user ? '退出登录' : '使用公司飞书登录');
     action.disabled = Boolean(busy);
     action.classList.toggle('sign-in',!user);
+    const token = user ? verifiedToken : '';
+    if (profileToken!==token || verifiedProfile?.name!==user?.name || verifiedProfile?.avatar!==user?.avatar) {
+      profileToken = token;
+      verifiedProfile = user;
+      window.dispatchEvent(new Event('workbench-account-changed'));
+    }
   }
 
   function position() {

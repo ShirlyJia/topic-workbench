@@ -2,7 +2,7 @@ import {validateDelivery} from './delivery-model.js';
 import {validateCanvasItems} from './canvas-items.js';
 import {validateProjectLifecycle} from './project-lifecycle.js';
 import {validateProjectFlow} from './project-flow.js';
-import {assigneeNameLimit,isAssigneeAvatar} from './project-assignee.js?v=20261126-assignee';
+import {assigneeNameLimit,isAssigneeAvatar} from './project-assignee.js?v=20261126-multi-assignees';
 /** Local-only, schema-v2 persistence. No seed writes, remote calls, or business workflow rules. */
 export function createPersistence({ key = 'topic-workbench-v2', onStatus } = {}) {
   if (typeof key !== 'string' || !key.trim()) throw new Error('存储 key 必须是非空字符串');
@@ -157,13 +157,17 @@ export function createPersistence({ key = 'topic-workbench-v2', onStatus } = {})
       text(project.name, `${path}.name`);
       references(project.tagIds, tagIds, `${path}.tagIds`);
       optionalStrings(project, ['kind', 'priority', 'status', 'summary', 'description', 'result', 'outcome', 'closedAt', 'impact', 'commentDraft', 'commentAuthor'], path);
-      if (project.assignee !== undefined) {
-        const {assignee} = project, assigneePath = `${path}.assignee`;
+      const validateAssignee = (assignee, assigneePath) => {
         record(assignee, assigneePath);
         text(assignee.name, `${assigneePath}.name`);
         if (assignee.name.length > assigneeNameLimit) fail(`${assigneePath}.name 过长`);
         if (assignee.avatar !== undefined && !isAssigneeAvatar(assignee.avatar)) fail(`${assigneePath}.avatar 格式无效`);
         if (Object.keys(assignee).some(key => key !== 'name' && key !== 'avatar')) fail(`${assigneePath} 包含额外的人员信息`);
+      };
+      if (project.assignee !== undefined) validateAssignee(project.assignee, path+'.assignee');
+      if (project.assignees !== undefined) {
+        array(project.assignees, path+'.assignees');
+        project.assignees.forEach((person,index)=>validateAssignee(person,path+'.assignees['+index+']'));
       }
       richTextShape(project.richText, ['description', 'result', 'impact', 'commentDraft', 'freezeReason', 'terminationReason', 'resumeCondition'], `${path}.richText`);
       if (project.closed !== undefined && typeof project.closed !== 'boolean') fail(`${path}.closed 必须为布尔值`);

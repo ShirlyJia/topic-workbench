@@ -1,5 +1,5 @@
 import {applyViewerMode,removeRetiredSession} from './viewer-mode.js';
-import {buildSearchIndex,matchesKeywords} from './global-search.js?v=20261126-assignee';
+import {buildSearchIndex,matchesKeywords} from './global-search.js?v=20261126-multi-assignees';
 import {mountGlobalSearch} from './global-search-view.js';
 import {createMeetingStore,loadMeetingStore} from './meetings.js?v=20261117-global-search';
 import {createCanvasEditor} from './canvas-editor.js?v=20261030-detail';
@@ -37,11 +37,12 @@ import {applyProfessionalColors, colorPickerMarkup, installColorPickers} from '.
 import {moveFramesToEdge} from './frame-layers.js';
 import {orderedTags,renameTag,moveTag,tagFilterMarkup,tagProjectCounts,mountTagEditor} from './tag-editor.js?v=20261030-tag-counts';
 import {mountProjectTagPicker,projectTagTriggerMarkup,projectTagNameKey} from './project-tag-picker.js?v=20261124-tag-picker';
-import {assigneeMarkup,assigneeFieldMarkup,lookupFeishuAssignees,mountAssigneePicker} from './project-assignee.js?v=20261126-assignee';
+import {projectAssignees,assigneeListMarkup,assigneeFieldMarkup,lookupFeishuAssignees,lookupFeishuAvatars,mountAssigneePicker} from './project-assignee.js?v=20261126-multi-assignees';
 import {referenceLinesMarkup, clonePlacement, removePlacement} from './canvas-references.js?v=20261102-remove-reference';
 import {fitCardPreviews} from './card-preview.js?v=20261030-two-line-previews';
 import {createProjectList} from './project-list.js?v=20261030-grouped-list';
 import {directionFocusModel,directionIcon} from './direction-focus.js?v=20261030-direction2';
+import {createSignedComments} from './signed-comments.js?v=20261126-signed-comments';
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -54,6 +55,7 @@ const textValue = value => typeof value === 'string' ? value : typeof value === 
 const pageIcon = '<svg class="page-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2h7l4 4v12H5zM12 2v5h4M8 11h5M8 14h4"/></svg>';
 let projectList = null, workbench = null, canvasEditor = null, flowEditor = null, deliveryController = null, tagEditor = null, projectTagPicker = null;
 const inlineTimers = new Map();
+const signedComments = createSignedComments({notify:toast});
 const composingInputs='[data-inline-composing],[data-flow-composing]';
 const pendingInputs='[data-inline][data-pending],[data-flow-pending],'+composingInputs;
 const expandedDirectionTrees = new Set();
@@ -139,7 +141,7 @@ function mutate(fn, message='', options={}) {
   if(canvasEditor?.flush()===false)return false;
   const before=clone(documentData());
   try {reconcileDelivery(state);fn();syncFrameBoards(state);recordDeliveryLifecycle(state,before);reconcileDelivery(state);storage.validate(documentData());} catch(e) {restoreData(before);toast(e.message);return false;}
-  indexData(); const saved=save();
+  indexData(); const saved=save(options.recordHistory ?? true);
   if(!saved&&options.rollbackOnSaveFailure){restoreData(before);renderAll({...options,keepDetail:true});return false;}
   renderAll(options);if(message&&saved)toast(message);return true;
 }
@@ -170,7 +172,7 @@ function cardMarkup(p,{instance,showCategoryTags}){
     '<button type="button" class="card-copy" data-copy-instance="'+esc(instance.id)+'" data-hint="复制到画板" aria-keyshortcuts="Control+D Meta+D" aria-label="复制'+esc(p.name)+'到画板"><svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M13 5V3H3v10h2"/></svg></button>'+
     '<button type="button" class="card-remove-reference" data-remove-instance="'+esc(instance.id)+'" data-hint="移除此处引用" aria-label="移除此处引用"><svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M6.5 10h7" stroke-linecap="round"/></svg></button></div>':'';
   return childBadgeMarkup(children.length,p.id,{expandable,expanded})+(eyebrow||instance?.focus?'<div class="card-eyebrow">'+eyebrow+(instance?.focus?'<span class="focus-mark">★ 本处重点</span>':'')+'</div>':'')+'<div class="card-heading">'+pageIcon+'<h3 class="card-title">'+esc(p.name)+'</h3>'+actions+'<button class="detail-arrow" data-open="'+esc(p.id)+'" aria-label="查看'+esc(p.name)+'详情">↗</button></div>'+
-  parentCardMarkup(p.id,state,{preferredParent:focusedDirection?.rows.find(row=>row.project.id===p.id)?.parent.id})+'<div class="card-tags">'+priorityControl(p,true)+assigneeMarkup(p.assignee)+categoryTags+'</div>'+
+  parentCardMarkup(p.id,state,{preferredParent:focusedDirection?.rows.find(row=>row.project.id===p.id)?.parent.id})+'<div class="card-tags">'+priorityControl(p,true)+assigneeListMarkup(projectAssignees(p))+categoryTags+'</div>'+
   (p.description?'<p class="card-note">'+esc(displayDescription(p.description))+'</p>':'')+
   deliveryCardMarkup(p)+(node?.owner&&!node.targetDate&&!node.estimatedDate?'<div class="card-footer">'+esc(node.owner)+'</div>':'')+
   ((projectInstances(p.id).length>1||instance?.context)?'<div class="card-reference">'+(projectInstances(p.id).length>1?'<span>'+projectInstances(p.id).length+' 处引用</span>':'')+(instance?.context?'<span title="'+esc(instance.context)+'">有本处备注</span>':'')+'</div>':'')+(expanded?childTreeMarkup(children):'');
@@ -517,13 +519,15 @@ function detailRestoreMenu(p,available){
 }
 function commentPoolMarkup(p){
   const rows=orderedComments(p.comments||[]);
-  const entries=rows.map(c=>{
+  const entry=c=>{
     const title=c.author||'';let time='';
     if(c.createdAt&&!Number.isNaN(Date.parse(c.createdAt)))time=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(c.createdAt));
     return '<article class="comment-entry'+(c.pinned?' is-pinned':'')+'" data-comment-card="'+esc(c.id)+'"><header><button type="button" class="comment-drag-handle" data-comment-drag="'+esc(c.id)+'" aria-label="拖动记录：'+esc(title||'随手记录')+'" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="拖动排序，也可按 Alt + ↑ / ↓"><svg viewBox="0 0 16 20" aria-hidden="true"><circle cx="5" cy="4" r="1"/><circle cx="11" cy="4" r="1"/><circle cx="5" cy="10" r="1"/><circle cx="11" cy="10" r="1"/><circle cx="5" cy="16" r="1"/><circle cx="11" cy="16" r="1"/></svg></button><div class="comment-meta"><input class="comment-title" data-inline="author" data-comment-id="'+esc(c.id)+'" aria-label="记录标题" title="点击修改标题" placeholder="随手记录" maxlength="120" value="'+esc(title)+'">'+(time?'<time datetime="'+esc(c.createdAt)+'">'+esc(time)+'</time>':'')+'</div><div class="comment-actions"><button type="button" class="comment-pin" data-pin-comment="'+esc(c.id)+'" aria-label="'+(c.pinned?'取消置顶':'置顶这条记录')+'" title="'+(c.pinned?'取消置顶':'置顶')+'" aria-pressed="'+Boolean(c.pinned)+'"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 3h6l-1 5 3 3v2H5v-2l3-3-1-5Zm3 10v5"/></svg>'+(c.pinned?'<span>置顶</span>':'')+'</button><button type="button" data-delete-comment="'+esc(c.id)+'" aria-label="删除这条记录" title="删除记录">×</button></div></header>'+inlineText('body','记录内容',c.body,{comment:c.id,rows:2,autogrow:true,placeholder:'记录内容'})+'</article>';
-  }).join('');
-  const composer='<form id="commentForm">'+inlineText('commentDraft','记录新信息',p.commentDraft||'',{placeholder:'记下想法、讨论或进展…'})+'<div class="comment-compose-actions"><input data-inline="commentAuthor" aria-label="新记录标题" placeholder="标题（选填）" maxlength="120" value="'+esc(p.commentAuthor||'')+'"><button class="primary" type="submit">记一条 <span aria-hidden="true">↗</span></button></div></form>';
-  return composer+'<div class="comment-entries" aria-label="已记录的信息">'+entries+'</div>';
+  };
+  const composer=canMaintain()?'<form id="commentForm">'+inlineText('commentDraft','记录新信息',p.commentDraft||'',{placeholder:'记下想法、讨论或进展…'})+'<div class="comment-compose-actions"><input data-inline="commentAuthor" aria-label="新记录标题" placeholder="标题（选填）" maxlength="120" value="'+esc(p.commentAuthor||'')+'"><button class="primary" type="submit">记一条 <span aria-hidden="true">↗</span></button></div></form>':'';
+  const pinned=rows.filter(c=>c.pinned).map(entry).join('');
+  const entries=rows.filter(c=>!c.pinned).map(entry).join('');
+  return '<div data-signed-composer></div>'+composer+'<div class="comment-entries" aria-label="已记录的信息">'+pinned+'<div data-signed-list></div>'+entries+'</div>';
 }
 function bindHoverMenus(){
   const timers=new WeakMap();
@@ -626,7 +630,7 @@ function openDetail(pid,instanceId=null,resetScroll=true,{keepTrail=false}={}){
   const parentHint=parentProjectHintMarkup(p.id,state);
   let html='<div class="detail-title-tools"><div class="detail-kind-row"><label class="kind-select"><select data-inline="kind" aria-label="项目类型"><option value="project"'+(p.kind!=='direction'?' selected':'')+'>项目</option><option value="direction"'+(p.kind==='direction'?' selected':'')+'>长期方向</option></select></label>'+(parentHint?'<span class="detail-child-label">子项目</span>':'')+'</div>'+navigation+'</div>';
   html+=parentHint+'<div class="project-title-editor">'+inlineText('name','项目标题',p.name,{title:true,rows:1,autogrow:true})+'<button type="button" data-edit-project-title aria-label="修改项目标题">✎ 改标题</button></div>';
-  html+='<div class="detail-edit-properties"><label><span>优先级</span>'+priorityControl(p)+'</label>'+assigneeFieldMarkup(p.assignee,maintainer)+'<label class="free-status"><span>结果状态</span><input class="inline-input" data-inline="outcome" aria-label="结果状态" value="'+esc(p.outcome||'')+'" placeholder="自由填写"></label><label class="lifecycle-control"><span>项目状态</span><select data-project-lifecycle aria-label="项目状态">'+Object.entries(lifecycleLabels).map(([value,label])=>'<option value="'+value+'"'+(projectLifecycle(p)===value?' selected':'')+'>'+label+'</option>').join('')+'</select></label></div>';
+  html+='<div class="detail-edit-properties"><label><span>优先级</span>'+priorityControl(p)+'</label>'+assigneeFieldMarkup(projectAssignees(p),maintainer)+'<label class="free-status"><span>结果状态</span><input class="inline-input" data-inline="outcome" aria-label="结果状态" value="'+esc(p.outcome||'')+'" placeholder="自由填写"></label><label class="lifecycle-control"><span>项目状态</span><select data-project-lifecycle aria-label="项目状态">'+Object.entries(lifecycleLabels).map(([value,label])=>'<option value="'+value+'"'+(projectLifecycle(p)===value?' selected':'')+'>'+label+'</option>').join('')+'</select></label></div>';
   html+=flowMarkup(p)+lifecycleLog(p);
   const deliverySummary=deliveryCardMarkup(p);if(deliverySummary)html+='<div class="detail-delivery-summary">'+deliverySummary+'<button type="button" data-delivery-plan-jump>查看交付计划 ↓</button></div>';
   html+=(maintainer||p.tagIds.length)?'<div class="detail-tags">'+detailTagContents(p,maintainer)+'</div>':'';
@@ -635,11 +639,12 @@ function openDetail(pid,instanceId=null,resetScroll=true,{keepTrail=false}={}){
   if(instance&&(instance.focus||instance.context))html+=section('本处备注',(instance.focus?'<p>★ 本处重点</p>':'')+(instance.context?'<div class="rich-content">'+richHTML(instance.richText?.context,instance.context)+'</div>':''),actionButton('编辑','placement',instance.id));
   html+='<details class="board-membership"><summary>行动看板 <span>'+state.quickBoards.filter(b=>b.projectIds.includes(pid)).map(b=>esc(b.name)).join(' · ')+'</span></summary><div>'+state.quickBoards.map(b=>'<label><input type="checkbox" data-project-board="'+esc(b.id)+'"'+(b.projectIds.includes(pid)?' checked':'')+'><span class="nav-color" style="background:'+esc(b.color)+'"></span>'+esc(b.name)+'</label>').join('')+'</div></details>';
   projectTagPicker?.close();
+  signedComments.detach();
   $('detailBody').querySelectorAll('[data-inline]').forEach(el=>{clearTimeout(inlineTimers.get(el));inlineTimers.delete(el);});flowEditor?.destroy();destroyRichEditors($('detailBody'));$('detailBody').innerHTML=html;if(canMaintain())mountRichEditors($('detailBody'),{onError:toast,onCommit:commitInline});flowEditor=mountProjectFlow($('detailBody'),{getProject:()=>byId[pid],mutate:(fn,message,options)=>mutateFlow(pid,fn,message,options),toast,canAutoSave:readyForAutosave,onPendingChange:refreshSaveStatus,onChange:({kind})=>{if(kind==='current')openDetail(pid,state.detailInstance,false);}});$('detail').hidden=false;$('detailBody').scrollTop=resetScroll?0:scroll;resizeInlineFields();syncActiveProject();if(resetScroll){$('closeDetail').focus({preventScroll:true});revealActiveProject();}
-  applyViewerMode($('detailBody'),canMaintain());syncDetailBack();
+  applyViewerMode($('detailBody'),canMaintain());signedComments.attach(pid,$('detailBody'));syncDetailBack();
   return true;
 }
-function closeDetail(){if(!flushInline())return;projectTagPicker?.close();detailTrail.length=0;state.detail=null;state.detailInstance=null;$('detail').hidden=true;workbench?.render();syncActiveProject();}
+function closeDetail(){if(!flushInline()||!flushRichEditors($('detailBody')))return;signedComments.detach();projectTagPicker?.close();detailTrail.length=0;state.detail=null;state.detailInstance=null;$('detail').hidden=true;workbench?.render();syncActiveProject();}
 function field(name,label,value='',type='text',extra=''){return '<label class="form-field"><span>'+label+'</span><input name="'+name+'" type="'+type+'" value="'+esc(value)+'" '+extra+'></label>';}
 function area(name,label,value='',rows=3){return '<label class="form-field"><span>'+label+'</span><textarea name="'+name+'" rows="'+rows+'">'+esc(value)+'</textarea></label>';}
 function selectField(name,label,value,options){return '<label class="form-field"><span>'+label+'</span><select name="'+name+'">'+options.map(([v,t])=>'<option value="'+esc(v)+'"'+(v===value?' selected':'')+'>'+esc(t)+'</option>').join('')+'</select></label>';}
@@ -971,13 +976,32 @@ if(canMaintain())mountAssigneePicker({
   root:$('detailBody'),
   getProject:()=>canMaintain()&&!$('detail').hidden?byId[state.detail]:null,
   beforeOpen:flushInline,
-  lookup:(query,signal)=>lookupFeishuAssignees(SYNC_ORIGIN, cloudSync?.connection(), query, signal),
-  assign:(pid,person)=>{
+  knownPeople:()=>{
+    const counts=new Map();
+    for(const project of projects)for(const person of projectAssignees(project)){
+      const current=counts.get(person.name);
+      counts.set(person.name,{person:person.avatar||!current?person:current.person,count:(current?.count||0)+1});
+    }
+    return [...counts.values()].sort((first,second)=>second.count-first.count).slice(0,8).map(row=>row.person);
+  },
+  lookup:(query,signal)=>lookupFeishuAssignees(SYNC_ORIGIN,cloudSync?.connection(),query,signal),
+  lookupAvatars:refs=>lookupFeishuAvatars(SYNC_ORIGIN,cloudSync?.connection(),refs),
+  assign:(pid,people)=>{
     if(state.detail!==pid||!flushInline())return false;
     return mutate(()=>{
-      if(person)byId[pid].assignee=person;
-      else delete byId[pid].assignee;
+      delete byId[pid].assignee;
+      if(people.length)byId[pid].assignees=people;
+      else delete byId[pid].assignees;
     },'',{rollbackOnSaveFailure:true});
+  },
+  updateAvatars:(pid,previous,people)=>{
+    const project=byId[pid];
+    if(!project||dirty||!readyForAutosave()||JSON.stringify(projectAssignees(project))!==JSON.stringify(previous))return;
+    const saved=mutate(()=>project.assignees=people,'',{keepDetail:true,rollbackOnSaveFailure:true,recordHistory:false});
+    if(saved&&state.detail===pid){
+      const field=$('detailBody').querySelector('.detail-assignee-field');
+      if(field)field.outerHTML=assigneeFieldMarkup(people,canMaintain());
+    }
   }
 });
 projectTagPicker=mountProjectTagPicker({root:$('detail'),getProject:()=>canMaintain()&&!$('detail').hidden?byId[state.detail]:null,getTags:()=>state.tagDefinitions,edit:editProjectTags});
@@ -992,7 +1016,7 @@ $('tagDialog').addEventListener('cancel',e=>{if(!tagEditor.flush())e.preventDefa
 $('newTagColorControl').innerHTML=colorPickerMarkup('#8c8981','data-new-tag-color','new','标签颜色',{inputId:'newTagColor'});
 for(const [id,edge] of [['bringFrameFront','front'],['sendFrameBack','back']])$(id).addEventListener('click',()=>{if(!state.selectedFrames.size)return;mutate(()=>state.frames=moveFramesToEdge(state.frames,state.selectedFrames,edge),'',{keepDetail:true,rollbackOnSaveFailure:true});});
 mountDetailResize({panel:$('detail'),handle:$('detailResize'),container:document.querySelector('.workspace'),key:storageKey('topic-workbench-detail-width'),onResize:()=>{document.querySelector('.app-shell').style.setProperty('--detail-width',$('detail').style.getPropertyValue('--detail-width'));if(state?.detail)resizeInlineFields();}});
-bindDetailNavigation($('detailBody'));$('detailBack').addEventListener('click',goBackDetail);bindInlineEditing();bindProjectContent();bindHoverMenus();bindDeliveryActions();$('jumpComments').addEventListener('click',()=>{if(!flushInline())return;const p=byId[state.detail];if(p&&detailLayout(p).hidden.includes('comments'))mutate(()=>setDetailSectionHidden(p,'comments',false));const composer=canMaintain()?$('commentForm'):$('detailBody').querySelector('.comment-entries');composer?.scrollIntoView({block:'center',behavior:'smooth'});if(canMaintain())composer?.querySelector('[data-inline="commentDraft"]').focus({preventScroll:true});});$('detailSaveStatus').addEventListener('click',()=>{if(flushInline())save(false);});
+bindDetailNavigation($('detailBody'));$('detailBack').addEventListener('click',goBackDetail);bindInlineEditing();bindProjectContent();bindHoverMenus();bindDeliveryActions();$('jumpComments').addEventListener('click',()=>{if(!flushInline())return;const p=byId[state.detail];if(p&&detailLayout(p).hidden.includes('comments'))mutate(()=>setDetailSectionHidden(p,'comments',false));const composer=$('detailBody').querySelector('[data-signed-new],#commentForm:not([hidden]),[data-signed-login]');(composer||$('detailBody').querySelector('.comment-entries'))?.scrollIntoView({block:'center',behavior:'smooth'});(composer?.querySelector('.rich-editor-input')||composer)?.focus({preventScroll:true});});$('detailSaveStatus').addEventListener('click',()=>{if(flushInline())save(false);});
 $('snapshots').addEventListener('click',snapshotsPanel);$('reviewIssues').addEventListener('click',reviewPanel);
 document.addEventListener('click',e=>{const b=e.target.closest('[data-snapshot-read],[data-snapshot-export],[data-snapshot-delete],[data-review-project]');if(!b)return;try{if(b.hasAttribute('data-snapshot-read'))snapshotPreview(b.dataset.snapshotRead);if(b.hasAttribute('data-snapshot-export'))storage.download(snapshots.export(b.dataset.snapshotExport));if(b.hasAttribute('data-snapshot-delete')){const id=b.dataset.snapshotDelete;editor('删除快照','<p>仅删除这份历史快照，当前项目和布局保留。</p>',()=>{snapshots.remove(id);toast('快照已删除');},'确认删除');}if(b.hasAttribute('data-review-project')){$('editorDialog').close();openDetail(b.dataset.reviewProject);}}catch(error){toast(error.message);}});
 
