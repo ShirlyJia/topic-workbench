@@ -565,8 +565,17 @@ function inlineRelations(pid){
   return blocks;
 }
 function directionHistory(p){
-  const data=documentData();data.relations=data.relations.filter(r=>!r.draft);const rows=collectDirectionResults(p.id,data).filter(r=>isHistoryProject(r.project));if(!rows.length)return null;
-  return {key:'history',body:rows.map(({project:r,relations})=>'<div class="direction-result"><span class="lifecycle-badge '+projectLifecycle(r)+'">'+lifecycleLabels[projectLifecycle(r)]+'</span><button data-related="'+esc(r.id)+'">'+esc(r.name)+'</button><p>'+esc(r[lifecycleField(r)]??r.result??'待补充记录')+'</p>'+relations.filter(link=>link.context).map(link=>'<small>'+esc(link.context)+'</small>').join('')+'</div>').join('')};
+  const data = documentData();
+  data.relations = data.relations.filter(relation => !relation.draft);
+  const rows = collectDirectionResults(p.id,data).filter(({project}) => projectLifecycle(project) === 'completed');
+  if (!rows.length) return null;
+  const body = rows.map(({project,relations}) => {
+    const notes = relations.filter(link => link.context).map(link => '<small>'+esc(link.context)+'</small>').join('');
+    return '<div class="direction-result"><span class="lifecycle-badge completed">'+lifecycleLabels.completed+'</span>'+
+      '<button data-related="'+esc(project.id)+'">'+esc(project.name)+'</button>'+
+      '<p>'+esc(project.result??'待补充记录')+'</p>'+notes+'</div>';
+  }).join('');
+  return {key:'history',body};
 }
 function lifecycleLog(p){
   const events=p.lifecycleHistory||[];if(!events.length)return '';
