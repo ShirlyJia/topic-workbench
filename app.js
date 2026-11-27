@@ -557,10 +557,27 @@ function inlinePlan(n,total){
   return '<div class="inline-plan" data-plan="'+esc(n.id)+'">'+inlineText('title','计划事项',n.title,{node:n.id,rows:1,placeholder:'如：补充数据并确认验收范围'})+'<button class="row-delete" data-inline-delete-node="'+esc(n.id)+'" aria-label="移除这条计划">×</button>'+inlineText('owner','跟进人',n.owner,{node:n.id,type:'text'})+deliveryPlanMarkup(p,n)+(total>1?'<div class="plan-options"><label title="卡片优先显示延期计划，其余按日期排列"><input type="checkbox" data-inline="focus" data-node-id="'+esc(n.id)+'"'+(n.focus?' checked':'')+'>关注这条计划</label></div>':'')+inlineText('note','补充说明',n.note,{node:n.id,rows:1,placeholder:'选填'})+'</div>';
 }
 function inlineRelations(pid){
-  const blocks=[];
-  for(const [key,title,other] of [['main','关联小项目','child'],['child','所属主项目','main']]){
-    const links=state.relations.filter(r=>r[key]===pid);if(!links.length&&key!=='main')continue;
-    blocks.push({key:key==='main'?'children':'parents',body:(key==='main'?childSectionActionsMarkup():'')+links.map(r=>{const p=byId[r[other]];return '<div class="relation-row"><button class="related-card" data-related="'+esc(p.id)+'"><strong>'+esc(p.name)+'<span>↗</span></strong>'+(p.outcome?'<small>'+esc(p.outcome)+'</small>':'')+((isClosedProject(p)?p.result:p.description)?'<small class="shared-result">'+esc(isClosedProject(p)?p.result:displayDescription(p.description))+'</small>':'')+'</button>'+inlineText('context','这项关联的说明',r.context,{relation:r.id,rows:2,placeholder:'可选：它与本方向有什么关系'})+'<div class="row-actions">'+(r.draft?'<button class="draft-badge" data-confirm-relation="'+esc(r.id)+'">待确认 · 点击确认</button>':'<span></span>')+'<button class="text-action" data-remove-relation="'+esc(r.id)+'">解除关联</button></div></div>';}).join('')});
+  const blocks = [];
+  for (const [key,other] of [['main','child'],['child','main']]) {
+    const isChild = key === 'main';
+    const links = state.relations.filter(relation => relation[key] === pid);
+    if (!links.length && !isChild) continue;
+    const rows = links.map(relation => {
+      const project = byId[relation[other]];
+      const name = esc(project.name);
+      const title = isChild && projectLifecycle(project) === 'frozen'
+        ? '<span class="related-project-title">'+name+' <span class="lifecycle-badge frozen child-frozen-badge">'+lifecycleLabels.frozen+'</span></span>'
+        : name;
+      const closed = isClosedProject(project);
+      const summary = closed ? project.result : displayDescription(project.description);
+      return '<div class="relation-row"><button class="related-card" data-related="'+esc(project.id)+'"><strong>'+title+'<span>↗</span></strong>'+
+        (project.outcome ? '<small>'+esc(project.outcome)+'</small>' : '')+
+        (summary ? '<small class="shared-result">'+esc(summary)+'</small>' : '')+'</button>'+
+        inlineText('context','这项关联的说明',relation.context,{relation:relation.id,rows:2,placeholder:'可选：它与本方向有什么关系'})+
+        '<div class="row-actions">'+(relation.draft ? '<button class="draft-badge" data-confirm-relation="'+esc(relation.id)+'">待确认 · 点击确认</button>' : '<span></span>')+
+        '<button class="text-action" data-remove-relation="'+esc(relation.id)+'">解除关联</button></div></div>';
+    }).join('');
+    blocks.push({key:isChild?'children':'parents',body:(isChild?childSectionActionsMarkup():'')+rows});
   }
   return blocks;
 }
