@@ -1,4 +1,4 @@
-import {currentWorkbenchAccount,requestWorkbenchWorkspace} from './workspace-account.js?v=20261127-permissions';
+import {currentWorkbenchAccount,requestWorkbenchWorkspace} from './workspace-account.js?v=20261127-login';
 
 const isRevision = value => typeof value==='string' && /^[0-9a-f]{32}$/.test(value);
 export const canEditWorkspace = () => currentWorkbenchAccount()?.role==='editor';

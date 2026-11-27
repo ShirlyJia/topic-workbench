@@ -1,16 +1,15 @@
 import {applyViewerMode,removeRetiredSession} from './viewer-mode.js';
 import {buildSearchIndex,matchesKeywords} from './global-search.js?v=20261126-multi-assignees';
 import {mountGlobalSearch} from './global-search-view.js';
-import {createMeetingStore,loadMeetingStore} from './meetings.js?v=20261127-role-meetings';
 import {createCanvasEditor} from './canvas-editor.js?v=20261030-detail';
 import {canvasItemBounds, translateCanvasItem, restoreYellowNotes} from './canvas-items.js?v=20261030-detail';
 import {enrichProjectContent} from './project-content.js';
 import {orderedComments,moveComment,setCommentPinned,mountCommentSorting} from './comment-order.js';
 import {DETAIL_SECTION_TITLES, detailLayout, detailSectionTitle, visibleDetailSections, moveDetailSection, setDetailSectionHidden, renameDetailSection, removeCustomSection, restoreCustomSection} from './project-detail-layout.js';
 import {applyDomainTags} from './category-tags.js';
-import {openSharedSnapshots} from './shared-snapshots.js?v=20261127-permissions';
-import {currentWorkbenchAccount,workbenchAccountReady} from './workspace-account.js?v=20261127-permissions';
-import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-permissions';
+import {openSharedSnapshots} from './shared-snapshots.js?v=20261127-login';
+import {currentWorkbenchAccount,showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login';
+import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-login';
 import {findScheduleConflicts,findContentOverlaps} from './workbench-review.js?v=20261102-workdays';
 import { enrichWorkbench, isClosedProject, sortProjectsByPriority, collectDirectionResults, syncFrameBoards } from './workbench-model.js';
 import { createWorkbenchViews, colorControl } from './workbench-views.js?v=20261102-results';
@@ -19,7 +18,7 @@ import { detachSourceMetadata } from './source-detach.js';
 import { displayPriority, visibleNodes, nodeStatus, displayDescription } from './presentation.js';
 import {boardPublication, deployment, storageKey, useBoardEdition} from './deployment-config.js?v=20261105-editions';
 import {showBoardCopies} from './board-publication.js';
-import {SYNC_ORIGIN,boardFingerprint,loadSharedBoard,newerSharedBoard,prepareLiveStorage,rememberLiveBaseline,validateRelease} from './auto-sync.js?v=20261125-workbench-repo';
+import {SYNC_ORIGIN,boardFingerprint,prepareLiveStorage,rememberLiveBaseline,validateRelease} from './auto-sync.js?v=20261125-workbench-repo';
 import {richEditorMarkup, mountRichEditors, readRichEditor, richHTML, richHasContent, flushRichEditors, destroyRichEditors} from './rich-text.js?v=20261030-card-preview';
 import {frozenNote,saveFrozenNote} from './frozen-note.js';
 import {freezeCommentPickerMarkup,mountFreezeCommentPickers} from './freeze-comment-picker.js';
@@ -44,7 +43,7 @@ import {referenceLinesMarkup, clonePlacement, removePlacement} from './canvas-re
 import {fitCardPreviews} from './card-preview.js?v=20261030-two-line-previews';
 import {createProjectList} from './project-list.js?v=20261030-grouped-list';
 import {directionFocusModel,directionIcon} from './direction-focus.js?v=20261030-direction2';
-import {createSignedComments} from './signed-comments.js?v=20261127-permissions';
+import {createSignedComments} from './signed-comments.js?v=20261127-login';
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -70,17 +69,20 @@ let localSavePhase='loading', onlineSaveStatus=null;
 const saveStatusLabels={
   loading:'载入中',saved:'已保存',saving:'自动保存中',synced:'已同步',syncing:'同步中',background:'已交给后台',
   waiting:'待同步',conflict:'同步冲突',attention:'同步待处理',failed:'保存失败',
-  incomplete:'待补齐',reader:'公开浏览',recovery:'需要恢复',unavailable:'未载入'
+  incomplete:'待补齐',reader:'可留言',recovery:'需要恢复',unavailable:'未载入'
 };
 let cloudSync = null, directoryConnection = '';
 let localMaintainer = false, globalSearch = null, searchMeetings = [], searchEntries = [], searchMeetingStatus = '正在读取会议记录…', projectSearchText = new Map();
 const canMaintain = () => localMaintainer && canEditWorkspace();
 function refreshSearchIndex(){searchEntries=buildSearchIndex(state,searchMeetings);projectSearchText=new Map(searchEntries.filter(r=>r.type==='project').map(r=>[r.id,r.text]));}
 async function refreshSearchMeetings(){
-  const shared=await readWorkspace('meetings').catch(()=>null);
-  const result=shared?{data:shared.data}:await loadMeetingStore(createMeetingStore(localStorage),(url,options)=>fetch(url,{...options,signal:AbortSignal.timeout(6000)}));
-  searchMeetings=result.data?.meetings||[];
-  searchMeetingStatus=result.error?'会议记录暂未载入，请稍后重新搜索':'';
+  try {
+    const shared=await readWorkspace('meetings');
+    searchMeetings=shared.data.meetings;
+    searchMeetingStatus='';
+  } catch {
+    searchMeetingStatus='会议记录暂未载入，请稍后重新搜索';
+  }
   refreshSearchIndex();globalSearch?.refresh();
 }
 let storage = createPersistence({key:storageKey('topic-workbench-v2'),onStatus: result => {
@@ -1366,12 +1368,6 @@ world.addEventListener('dblclick',e=>{const h=e.target.closest('[data-frame-head
 function normalizeBoard(data) {
   return applyProfessionalColors(restoreYellowNotes(detachSourceMetadata(enrichProjectContent(applyDomainTags(enrichWorkbench(data)))).data));
 }
-function readPublishedCopy(key) {
-  try { return validateRelease(JSON.parse(localStorage.getItem(key))); } catch { return null; }
-}
-function cachePublishedCopy(key, release) {
-  try { localStorage.setItem(key,JSON.stringify(release)); } catch {}
-}
 const publicationClock=new Intl.DateTimeFormat('zh-CN',{
   timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',
   hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'
@@ -1389,7 +1385,7 @@ function showPublicationTime(release) {
   stamp.title='北京时间 · 版本 '+release.revision.slice(0,8);
   stamp.hidden=false;
 }
-function updatePublicBoard(release, cacheKey) {
+function updateSharedBoard(release) {
   const data=normalizeBoard(release.board);
   storage.validate(data);
   restoreData({...data,view:state.view});
@@ -1397,33 +1393,26 @@ function updatePublicBoard(release, cacheKey) {
   if (state.detail && !byId[state.detail]) closeDetail();
   renderAll();
   showPublicationTime(release);
-  cachePublishedCopy(cacheKey,release);
 }
 async function boot(){
+ await workbenchAccountReady;
+ if (!showWorkbench()) return;
  try {
   const syncKey = storageKey('topic-workbench-auto-sync');
   try { directoryConnection=localStorage.getItem(syncKey+':connection')||''; } catch {}
   removeRetiredSession({local:localStorage,session:sessionStorage,location,history});
-  const publicCopyKey=syncKey+':public-copy',dataKey=storageKey('topic-workbench-live-v1');
-  const [,workspace]=await Promise.all([workbenchAccountReady,readWorkspace('board').catch(()=>null)]);
-  let boardOnline=Boolean(workspace);
+  const dataKey=storageKey('topic-workbench-live-v1');
   const asRelease=value=>validateRelease({...value,board:value.data});
-  const cached=readPublishedCopy(publicCopyKey);
-  const legacy=workspace?null:await loadSharedBoard({publicSite:deployment.public});
-  let release=workspace?asRelease(workspace):newerSharedBoard(cached,legacy)?legacy:cached;
-  if (release) useBoardEdition(release.updatedAt.slice(0,10)+'-'+release.revision.slice(0,16));
+  let release=asRelease(await readWorkspace('board'));
+  if (!currentWorkbenchAccount()) return;
+  useBoardEdition(release.updatedAt.slice(0,10)+'-'+release.revision.slice(0,16));
   const liveEdition=!boardPublication.edition||boardPublication.active===boardPublication.edition;
-  localMaintainer=Boolean(workspace)&&canEditWorkspace()&&liveEdition;
+  localMaintainer=canEditWorkspace()&&liveEdition;
   document.body.classList.toggle('board-reader',!canMaintain());
   if (localMaintainer) await prepareLiveStorage({storage:localStorage,key:dataKey,
     archivePrefix:(deployment.public?deployment.namespace+':':'')+'topic-workbench-v2',release});
   storage=createPersistence({key:dataKey,onStatus:result=>{if(result?.ok===false)setSaveStatus(false);}});
-  let seed=release?.board;
-  if (!seed) {
-    const response=await fetch('./initial-data.json',{cache:'no-cache'});
-    if (!response.ok) throw Error('初始项目尚未就绪');
-    seed=await response.json();
-  }
+  const seed=release.board;
   storage.validate(seed);
   const loaded=localMaintainer?storage.load(seed):{data:seed,fromStorage:false,error:null};
   if (localMaintainer) {
@@ -1444,7 +1433,7 @@ async function boot(){
       onSaved:value=>{
         release=asRelease(value);
         rememberLiveBaseline(localStorage,dataKey,release).catch(()=>{});
-        showPublicationTime(release);cachePublishedCopy(publicCopyKey,release);
+        showPublicationTime(release);
       }});
     retry.onclick=()=>cloudSync.retry();
     publish.onclick=()=>{
@@ -1468,16 +1457,13 @@ async function boot(){
   const compact=matchMedia('(min-width:761px) and (max-width:1100px)').matches;if(compact)document.body.classList.add('sidebar-collapsed');
   renderAll();setDisplay(state.display);save(loaded.fromStorage&&!loaded.data.frameBoardSyncVersion&&data.quickBoards.some(board=>board.sourceFrameId),{publish:false});
   if (canMaintain()) localStorage.setItem(storageKey('topic-workbench-active-key'),dataKey);
-  if (release) showPublicationTime(release);
-  if (boardOnline && release) cachePublishedCopy(publicCopyKey,release);
+  showPublicationTime(release);
   cloudSync?.start();
   refreshSearchMeetings();
-  if (!boardOnline) toast('线上服务暂不可用，当前显示上次发布版');
-  if (liveEdition) watchWorkspace('board',()=>boardOnline?(release?.revision||''):'',next=>{
-    if (!boardOnline && canEditWorkspace()) {location.reload();return;}
+  if (liveEdition) watchWorkspace('board',()=>release.revision,next=>{
     if (cloudSync && (dirty||document.querySelector(pendingInputs)||!cloudSync.acceptRemote({...next,data:normalizeBoard(next.data)}))) return;
-    release=asRelease(next);boardOnline=true;
-    updatePublicBoard(release,publicCopyKey);
+    release=asRelease(next);
+    updateSharedBoard(release);
     if (canMaintain()) {
       storage.commit(documentData(),{recordHistory:false});
       rememberLiveBaseline(localStorage,dataKey,release).catch(()=>{});

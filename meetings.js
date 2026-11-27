@@ -35,7 +35,7 @@ export function initialMeetings() {
     id:'meeting-2026-10-23-biweekly', title:'10-23 双周会', date:'2026-10-23', type:'其他', category:'cross-team',
     attendees:'', notes:'', conclusions:'', followUp:'', projectIds:[], createdAt:'', updatedAt:'',
     originNote:'',
-    materials:[{id:'material-biweekly-document', title:'10-23 双周会文档', url:'https://vcnxjo4gpx7l.feishu.cn/docx/Q9lJdvXPko6mpBxAvNKcRusnnoj'}]
+    materials:[{id:'material-biweekly-document', title:'会议纪要', url:''}]
   }], deletedMeetings:[], deletedItems:[]};
 }
 
@@ -182,14 +182,16 @@ export function deletedMeetingFileIds(data) {
 }
 
 async function bootMeetings() {
-  const [{currentWorkbenchAccount,requestWorkbenchWorkspace,workbenchAccountReady},
+  const [{currentWorkbenchAccount,requestWorkbenchWorkspace,showWorkbench,workbenchAccountReady},
     {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace}]=await Promise.all([
-    import('./workspace-account.js?v=20261127-permissions'),import('./workspace-sync.js?v=20261127-permissions')
+    import('./workspace-account.js?v=20261127-login'),import('./workspace-sync.js?v=20261127-login')
   ]);
+  await workbenchAccountReady;
+  if (!showWorkbench()) return;
   const $ = id => document.getElementById(id);
   // The storage getter itself may be denied; leave the old data untouched in that case.
   const adapter = {getItem:key => globalThis.localStorage.getItem(key), setItem:(key,value) => globalThis.localStorage.setItem(key,value)};
-  const store=createMeetingStore(adapter),localFiles=createMeetingFiles();
+  const localFiles=createMeetingFiles();
   let data=null,selected=null,projects=[],projectError='',dirty=false,timer,toastTimer,loadRevision=0;
   let shared=null,sharedRevision='',watching=false,editableSession=false,sessionLoaded=false;
   const editable=()=>Boolean(shared)&&canEditWorkspace();
@@ -204,7 +206,7 @@ async function bootMeetings() {
     async get(fileId){
       try {return await requestWorkbenchWorkspace('files/'+encodeURIComponent(fileId),{asBlob:true});}
       catch (reason) {
-        const local=await localFiles.get(fileId).catch(()=>null);
+        const local=canEditWorkspace()?await localFiles.get(fileId).catch(()=>null):null;
         if (local || reason.status===404) return local;
         throw reason;
       }
@@ -277,7 +279,12 @@ async function bootMeetings() {
     renderList();
     if(immediate)return save();timer=setTimeout(save,400);return true;
   }
-  function refreshProjects() { const result = readMeetingProjects(adapter); projects = result.projects; projectError = result.error; if (current()) renderProjects(); }
+  function refreshProjects() {
+    if (!canEditWorkspace()) return;
+    const result=readMeetingProjects(adapter);
+    projects=result.projects;projectError=result.error;
+    if (current()) renderProjects();
+  }
   function renderList() {
     document.querySelectorAll('[data-category]').forEach(button=>{const active=button.dataset.category===activeCategory;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
     $('meetingList').setAttribute('aria-labelledby',activeCategory==='cross-team'?'crossTeamTab':'internalTab');$('emptyTitle').textContent=categoryLabel(activeCategory);
@@ -374,10 +381,9 @@ async function bootMeetings() {
     $('newMeeting').disabled = true; $('exportMeetings').disabled = true; $('openTrash').disabled = true;
     $('undoDelete').disabled = true; $('exportRaw').disabled = true;
     $('meetingEditor').hidden = true; $('emptyState').hidden = true; status('正在读取…');
-    await workbenchAccountReady;
-    const remote=await readWorkspace('meetings').catch(()=>null);
-    const result=remote?{data:remote.data,error:null}:await loadMeetingStore(store);
-    if (revision!==loadRevision) return;
+    let remote, loadError='';
+    try {remote=await readWorkspace('meetings');} catch (failure) {loadError=failure.message;}
+    if (revision!==loadRevision || !currentWorkbenchAccount()) return;
     shared?.dispose();shared=null;
     editableSession=canEditWorkspace();sessionLoaded=true;
     if (remote && editableSession) {
@@ -389,19 +395,20 @@ async function bootMeetings() {
       mountRichEditors($('meetingEditor'),{onError:message=>toast(message)});
     }
     sharedRevision=remote?.revision||'';
-    data=shared?.pendingData() || result.data;
+    data=shared?.pendingData() || remote?.data;
     if (data) {validateMeetings(data);data=enrichMeetingContent(data);data.deletedItems??=[];}
     dirty=false;
-    $('loadError').hidden=!result.error;
-    $('exportMeetings').disabled=!!result.error;
-    $('legacyMeetings').hidden=adapter.getItem(MEETING_KEY)===null;
-    $('exportRaw').disabled=adapter.getItem(MEETING_KEY)===null;
-    if (result.error) {$('loadErrorText').textContent=result.error;status('需要恢复',true);selected=null;}
+    $('loadError').hidden=!loadError;
+    $('exportMeetings').disabled=!!loadError;
+    const hasLocalCopy=editableSession && adapter.getItem(MEETING_KEY)!==null;
+    $('legacyMeetings').hidden=!hasLocalCopy;
+    $('exportRaw').disabled=!hasLocalCopy;
+    if (loadError) {$('loadErrorText').textContent=loadError;status('载入失败',true);selected=null;}
     else {
       const rows=categoryMeetings();
       selected=rows.some(meeting=>meeting.id===selected)?selected:rows[0]?.id||null;
       if (shared) shared.start();
-      else status(remote?'只读':'上次发布版');
+      else status('只读');
     }
     if (!watching) {
       watching=true;
@@ -417,7 +424,7 @@ async function bootMeetings() {
     }
     const linkedId=new URLSearchParams(location.search).get('meeting');
     const linked=data?.meetings.find(meeting=>meeting.id===linkedId);
-    if(linked&&!result.error){selected=linked.id;activeCategory=meetingCategory(linked);}
+    if(linked){selected=linked.id;activeCategory=meetingCategory(linked);}
     refreshProjects();renderList();renderEditor();
     refreshSharedProjects();
   }
@@ -530,6 +537,7 @@ async function bootMeetings() {
   $('trashList').onclick=event=>{const button=event.target.closest('[data-restore-id]');if(button)restoreEntry(button.dataset.restoreKind,button.dataset.restoreId);};
   $('exportMeetings').onclick=async()=>{if(!data||!flushRichEditors($('meetingEditor')))return;try{const backup=clone(data),ids=deletedMeetingFileIds(backup);if(ids.length)backup.embeddedFiles=await files.exportFiles(ids);download(backup,`会议记录${dirty?'-未保存草稿':''}-${new Date().toISOString().slice(0,10)}.json`);}catch(failure){toast('导出未完成：'+failure.message);}};
   $('exportRaw').onclick=$('legacyMeetings').onclick=()=>{
+    if (!canEditWorkspace()) return;
     const raw=adapter.getItem(MEETING_KEY);if(raw!==null)download(raw,'会议记录-本机备份.json');
   };
   document.addEventListener('click',event=>{const link=event.target.closest('a[href]');if(link&&link.target!=='_blank'&&!link.hasAttribute('download')&&!link.getAttribute('href').startsWith('#')&&!save())event.preventDefault();});

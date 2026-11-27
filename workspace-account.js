@@ -1,3 +1,5 @@
+import {mountWorkspaceLogin} from './workspace-login.js?v=20261127-login';
+
 const service = 'https://topic-collaboration-shirly.shirlyjia826.chatgpt.site';
 const sessionKey = 'topic-workbench-account-v1';
 const verifierKey = sessionKey+':verifier';
@@ -9,7 +11,7 @@ const userIcon = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy
 const cancelMessages = {
   cancelled:'飞书验证未完成，可以重新登录。',
   tenant:'请切换到公司的飞书账号。',
-  permission:'当前飞书账号尚未在应用可用范围内。',
+  permission:'此账号暂未开通工作台权限，请联系管理员。',
   provider:'飞书验证暂时失败，请重试。'
 };
 
@@ -34,6 +36,9 @@ async function serviceRequest(path,{method='GET',token,body,file,asBlob=false,ti
   } catch {
     throw Error(unavailable);
   }
+  if (response.status===401 && token && token===profileToken) {
+    window.dispatchEvent(new Event('workbench-session-invalid'));
+  }
   if (response.ok && asBlob) return response.blob();
   const result = await response.json().catch(()=>null);
   if (!response.ok || !result || typeof result!=='object') throw Object.assign(Error(result?.error || unavailable),{status:response.status,revision:result?.revision});
@@ -52,6 +57,12 @@ export function requestWorkbenchWorkspace(path,options) {
 
 export function currentWorkbenchAccount() {
   return credential()?.token===profileToken ? verifiedProfile : null;
+}
+
+export function showWorkbench() {
+  if (!currentWorkbenchAccount()) return false;
+  document.body.classList.remove('account-gated');
+  return true;
 }
 
 export function openWorkbenchAccount() {
@@ -93,7 +104,9 @@ function mountAccount(root) {
     '<div class="account-summary"></div><p class="account-message" role="status" hidden></p><button class="account-action" type="button"></button></div>';
   const trigger = root.querySelector('.account-trigger'), panel = root.querySelector('.account-menu');
   const summary = panel.querySelector('.account-summary'), message = panel.querySelector('.account-message'), action = panel.querySelector('.account-action');
-  let user = null, busy = '', error = '', verifiedToken = '', verifiedAt = 0, generation = 0, verifying;
+  const gated = document.body.classList.contains('account-gated');
+  const renderLogin = gated ? mountWorkspaceLogin(()=>runAccountAction(false)) : null;
+  let user = null, busy = '', error = '', verifiedToken = '', verifiedAt = 0, generation = 0, verifying, expiryTimer;
 
   function render() {
     const label = document.createElement('span');
@@ -116,10 +129,21 @@ function mountAccount(root) {
     action.textContent = busy || (user ? '退出登录' : '使用公司飞书登录');
     action.disabled = Boolean(busy);
     action.classList.toggle('sign-in',!user);
+    renderLogin?.({user,busy:busy || (verifying && !user ? '正在验证飞书账号…' : ''),error});
     const token = user ? verifiedToken : '';
     if (profileToken!==token || verifiedProfile?.name!==user?.name || verifiedProfile?.avatar!==user?.avatar || verifiedProfile?.role!==user?.role) {
+      const sessionChanged = profileToken!==token;
       profileToken = token;
       verifiedProfile = user;
+      clearTimeout(expiryTimer);
+      if (user) expiryTimer=setTimeout(refresh,Math.max(0,(credential()?.expiresAt||0)-Date.now()+100));
+      if (gated && sessionChanged && !document.body.classList.contains('account-gated')) {
+        document.body.classList.add('account-gated');
+        panel.hidePopover();
+        for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
+        location.reload();
+        return;
+      }
       window.dispatchEvent(new Event('workbench-account-changed'));
     }
   }
@@ -151,7 +175,7 @@ function mountAccount(root) {
     if (verifying === current.token || (verifiedToken === current.token && Date.now()-verifiedAt < 30_000)) return;
     verifying = current.token;
     const attempt = ++generation;
-    if (verifiedToken !== current.token) { user = null; render(); }
+    if (verifiedToken !== current.token) { user = null; error = ''; render(); }
     try {
       const result = await accountRequest('session',{token:current.token});
       if (attempt !== generation || credential()?.token !== current.token) return;
@@ -168,10 +192,11 @@ function mountAccount(root) {
     }
   }
 
-  action.addEventListener('click',async ()=>{
-    const signingOut = Boolean(user);
+  async function runAccountAction(signingOut) {
+    if (busy || (Boolean(user)!==signingOut)) return;
     busy = signingOut ? '正在退出…' : '正在打开飞书…';
     error = '';
+    let navigating = false;
     render();
     try {
       if (signingOut) {
@@ -183,7 +208,6 @@ function mountAccount(root) {
         user = null;
         verifiedToken = '';
         panel.hidePopover();
-        refresh();
       } else {
         const verifier = encode(crypto.getRandomValues(new Uint8Array(32)));
         const result = await accountRequest('start',{method:'POST',body:{returnTo:location.href,challenge:await hash(verifier)}});
@@ -191,14 +215,18 @@ function mountAccount(root) {
         if (url.origin!=='https://accounts.feishu.cn' || url.pathname!=='/open-apis/authen/v1/authorize') throw Error('飞书验证地址无效，请重试。');
         sessionStorage.setItem(verifierKey,verifier);
         location.assign(url.href);
+        navigating = true;
       }
     } catch (e) {
       error = e.message;
     } finally {
-      busy = '';
-      render();
+      if (!navigating) {
+        busy = '';
+        render();
+      }
     }
-  });
+  }
+  action.addEventListener('click',()=>runAccountAction(Boolean(user)));
 
   async function finishLogin(code,notice) {
     const verifier = sessionStorage.getItem(verifierKey);
@@ -207,12 +235,12 @@ function mountAccount(root) {
     if (notice) {
       error = cancelMessages[notice] || '飞书验证未完成，请重试。';
       render();
-      openMenu();
+      if (!gated) openMenu();
       return;
     }
     busy = '正在验证飞书账号…';
     render();
-    openMenu();
+    if (!gated) openMenu();
     try {
       if (!tokenPattern.test(verifier || '') || !tokenPattern.test(code || '')) throw Error('登录已过期，请重新登录。');
       const result = await accountRequest('exchange',{method:'POST',body:{code,verifier}});
@@ -237,7 +265,17 @@ function mountAccount(root) {
   const ready=fragment.has('account_code') || fragment.has('account_error')
     ? finishLogin(fragment.get('account_code'),fragment.get('account_error')) : refresh();
   window.addEventListener('focus',refresh);
+  window.addEventListener('pageshow',event=>{
+    if (!event.persisted) return;
+    busy = '';
+    render();
+    refresh();
+  });
   window.addEventListener('storage',event=>{ if (event.key===sessionKey) refresh(); });
+  window.addEventListener('workbench-session-invalid',()=>{
+    if (credential()?.token===verifiedToken) localStorage.removeItem(sessionKey);
+    refresh();
+  });
   document.addEventListener('visibilitychange',()=>{if (!document.hidden) refresh();});
   return ready;
 }

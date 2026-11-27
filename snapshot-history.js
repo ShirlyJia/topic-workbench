@@ -1,6 +1,6 @@
-import {localSnapshots,openSharedSnapshots} from './shared-snapshots.js?v=20261127-permissions';
-import {workbenchAccountReady} from './workspace-account.js?v=20261127-permissions';
-import {canEditWorkspace} from './workspace-sync.js?v=20261127-permissions';
+import {localSnapshots,openSharedSnapshots} from './shared-snapshots.js?v=20261127-login';
+import {showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login';
+import {canEditWorkspace} from './workspace-sync.js?v=20261127-login';
 import {storageKey} from './deployment-config.js';
 import {snapshotCanvasModel, snapshotCardMarkup, snapshotFrameMarkup} from './snapshot-canvas.js?v=20261126-multi-assignees';
 import {renderSnapshotProjectDetails, renderSnapshotRecords} from './snapshot-preview.js?v=20261126-multi-assignees';
@@ -119,19 +119,24 @@ viewport.addEventListener('wheel',e=>{e.preventDefault();if(drag)return;if(e.ctr
 world.addEventListener('keydown',e=>{const card=e.target.closest('[data-pid]');if(card&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openProject(card.dataset.pid);}});
 document.addEventListener('keydown',e=>{if(e.target.closest('input,textarea,select')||document.querySelector('dialog[open]'))return;if(e.key==='Escape'){if(drag){const g=drag;endPan({pointerId:g.id},true);}closeDetail();}if(!records&&(e.key==='+'||e.key==='=')){e.preventDefault();zoom(1.15);}if(!records&&e.key==='-'){e.preventDefault();zoom(1/1.15);}});
 window.addEventListener('blur',()=>{if(drag)endPan({pointerId:drag.id},true);});
-window.addEventListener('storage',e=>{if(e.key===storageKey('topic-workbench-snapshots-v1')){try{rows=store.list();listSnapshots();if(selectedId&&!rows.some(row=>row.id===selectedId))showMissing();}catch(error){showError(error);}}});
+window.addEventListener('storage',e=>{if(canEditWorkspace()&&e.key===storageKey('topic-workbench-snapshots-v1')){try{rows=store.list();listSnapshots();if(selectedId&&!rows.some(row=>row.id===selectedId))showMissing();}catch(error){showError(error);}}});
 mountDetailResize({panel:$('historyDetail'),handle:$('historyDetailResize'),container:$('historyWorkspace'),key:storageKey('topic-workbench-history-detail-width')});
 async function bootSnapshots(){
   await workbenchAccountReady;
+  if (!showWorkbench()) return;
   editorSession=canEditWorkspace();
+  if (!editorSession) {
+    emptySelection('快照由管理员查看','返回工作台可查看当前画板。');
+    return;
+  }
   const localMode=new URLSearchParams(location.search).has('local');
   try {
     const hasLegacy=legacy.list().length>0;
-    $('localHistory').hidden=!hasLegacy || !editorSession;
+    $('localHistory').hidden=!hasLegacy;
     $('localHistory').href=localMode?'snapshots.html':'snapshots.html?local=1';
     $('localHistory').textContent=localMode?'线上快照':'本机旧快照';
   } catch {}
-  if (editorSession && !localMode) {
+  if (!localMode) {
     try {
       shared=await openSharedSnapshots({onUpdate:load,onStatus:(phase,message)=>{
         $('historyPublishDraft').hidden=phase!=='conflict';
