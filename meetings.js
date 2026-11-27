@@ -184,7 +184,7 @@ export function deletedMeetingFileIds(data) {
 async function bootMeetings() {
   const [{currentWorkbenchAccount,requestWorkbenchWorkspace,showWorkbench,workbenchAccountReady},
     {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace}]=await Promise.all([
-    import('./workspace-account.js?v=20261127-login-entry'),import('./workspace-sync.js?v=20261127-login-entry')
+    import('./workspace-account.js?v=20261127-login-entry'),import('./workspace-sync.js?v=20261127-durable-sync')
   ]);
   await workbenchAccountReady;
   if (!currentWorkbenchAccount()) return;
@@ -386,11 +386,13 @@ async function bootMeetings() {
     shared?.dispose();shared=null;
     editableSession=canEditWorkspace();sessionLoaded=true;
     if (remote && editableSession) {
-      shared=createWorkspaceSync({kind:'meetings',release:remote,draftKey:MEETING_KEY+':shared:'+currentWorkbenchAccount().name,
+      const nextShared=await createWorkspaceSync({kind:'meetings',release:remote,draftKey:MEETING_KEY+':shared:'+currentWorkbenchAccount().name,
         onStatus:(phase,message)=>{
           status(message,phase!=='synced');
           $('saveStatus').title=phase==='conflict'?'点击核对并发布本机版本':'同步会议记录';
         },onSaved:value=>{sharedRevision=value.revision;}});
+      if (revision!==loadRevision) {nextShared.dispose();return;}
+      shared=nextShared;
       mountRichEditors($('meetingEditor'),{onError:message=>toast(message)});
     }
     sharedRevision=remote?.revision||'';

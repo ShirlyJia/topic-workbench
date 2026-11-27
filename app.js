@@ -8,8 +8,8 @@ import {orderedComments,moveComment,setCommentPinned,mountCommentSorting} from '
 import {DETAIL_SECTION_TITLES, detailLayout, detailSectionTitle, visibleDetailSections, moveDetailSection, setDetailSectionHidden, renameDetailSection, removeCustomSection, restoreCustomSection} from './project-detail-layout.js';
 import {applyDomainTags} from './category-tags.js';
 import {currentWorkbenchAccount,openWorkbenchAccount,showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login-entry';
-import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-sync-status';
-import {mountBoardSyncStatus} from './board-sync-view.js?v=20261127-resume-online';
+import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-durable-sync';
+import {mountBoardSyncStatus} from './board-sync-view.js?v=20261127-durable-sync';
 import {findScheduleConflicts,findContentOverlaps} from './workbench-review.js?v=20261102-workdays';
 import { enrichWorkbench, isClosedProject, sortProjectsByPriority, collectDirectionResults, syncFrameBoards } from './workbench-model.js';
 import { createWorkbenchViews, colorControl } from './workbench-views.js?v=20261102-results';
@@ -1447,7 +1447,9 @@ world.addEventListener('dblclick',e=>{const h=e.target.closest('[data-frame-head
 
 }
 function normalizeBoard(data) {
-  return applyProfessionalColors(restoreYellowNotes(detachSourceMetadata(enrichProjectContent(applyDomainTags(enrichWorkbench(data)))).data));
+  const normalized=applyProfessionalColors(restoreYellowNotes(detachSourceMetadata(enrichProjectContent(applyDomainTags(enrichWorkbench(data)))).data));
+  normalized.deliveryEvents??=[];
+  return normalized;
 }
 const publicationClock=new Intl.DateTimeFormat('zh-CN',{
   timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',
@@ -1492,19 +1494,13 @@ async function boot(){
   viewingArchive=canEditWorkspace()&&!viewOnline&&!!boardPublication.edition&&boardPublication.active!==boardPublication.edition;
   localMaintainer=canEditWorkspace()&&!viewingArchive&&!viewOnline;
   document.body.classList.toggle('board-reader',!canMaintain());
-  if (localMaintainer) await prepareLiveStorage({storage:localStorage,key:dataKey,
-    archivePrefix:(deployment.public?deployment.namespace+':':'')+'topic-workbench-v2',release});
   const boardKey=viewingArchive?storageKey('topic-workbench-v2'):dataKey;
   storage=createPersistence({key:boardKey,onStatus:result=>{if(result?.ok===false)setSaveStatus(false);}});
   const seed=release.board;
   storage.validate(seed);
   const normalizedSeed=normalizeBoard(seed);
-  const archived=viewingArchive?await boardPublication.readDraft():null;
-  const loaded=archived?{data:archived,fromStorage:true,error:null}:
-    localMaintainer||viewingArchive?storage.load(seed):{data:seed,fromStorage:false,error:null};
-  if (archived) storage.validate(archived);
   if (localMaintainer) {
-    cloudSync=createWorkspaceSync({kind:'board',release:{...release,data:normalizedSeed},fingerprint:boardFingerprint,
+    cloudSync=await createWorkspaceSync({kind:'board',release:{...release,data:normalizedSeed},fingerprint:boardFingerprint,
       draftKey:dataKey+':shared:'+currentWorkbenchAccount().name,
       onStatus:setOnlineSaveStatus,
       onSaved:value=>{
@@ -1512,11 +1508,14 @@ async function boot(){
         rememberLiveBaseline(localStorage,dataKey,release).catch(()=>{});
         showPublicationTime(release);
       }});
-    if (cloudSync.pendingData()) {
-      storage.validate(cloudSync.pendingData());
-      loaded.data=cloudSync.pendingData();
-    }
+    if (!cloudSync.pending()) await prepareLiveStorage({storage:localStorage,key:dataKey,
+      archivePrefix:(deployment.public?deployment.namespace+':':'')+'topic-workbench-v2',release});
   }
+  const archived=viewingArchive?await boardPublication.readDraft():null;
+  const draft=cloudSync?.pendingData()||archived;
+  const loaded=draft?{data:draft,fromStorage:true,error:null}:
+    localMaintainer||viewingArchive?storage.load(seed):{data:seed,fromStorage:false,error:null};
+  if (draft) storage.validate(draft);
   if(loaded.error){$('loadCaption').textContent='本地记录读取失败，原记录已保留';localSavePhase='recovery';refreshSaveStatus();$('world').innerHTML='<div class="load-error"><h2>本地记录暂时无法读取</h2><p>'+esc(loaded.error)+'</p><p>原记录已保留。先导出原始备份，再处理恢复。</p><button id="downloadRaw">导出原始记录</button></div>';$('downloadRaw').onclick=()=>storage.download(localStorage.getItem(boardKey));return;}
   if(!loaded.data.domainTagVersion&&loaded.fromStorage)localStorage.setItem(storageKey('topic-workbench-v2-before-domain-tags'),JSON.stringify(loaded.data));
   if(!loaded.data.projectContentVersion&&loaded.fromStorage)localStorage.setItem(storageKey('topic-workbench-v2-before-project-content'),JSON.stringify(loaded.data));

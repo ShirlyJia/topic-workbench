@@ -1,4 +1,4 @@
-import {localSnapshots,openSharedSnapshots} from './shared-snapshots.js?v=20261127-login-entry';
+import {localSnapshots,openSharedSnapshots} from './shared-snapshots.js?v=20261127-durable-sync';
 import {currentWorkbenchAccount,showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login-entry';
 import {canEditWorkspace} from './workspace-sync.js?v=20261127-login-entry';
 import {storageKey} from './deployment-config.js';

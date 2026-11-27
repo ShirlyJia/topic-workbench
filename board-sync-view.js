@@ -8,6 +8,7 @@ const states={
   conflict:{title:'线上有新版本',description:'本机改动已保留。先查看线上版，再决定是否发布本机草稿。',online:true,publish:true},
   'local-draft':{label:'本机有改动',title:'本机有未同步改动',description:'这份草稿与线上版不同。用线上版继续编辑时，草稿会保留在本机旧稿。',online:true,publish:true,resume:true},
   attention:{title:'暂未同步',description:'改动已保存在本机。请先处理下面的问题。',backup:true},
+  'draft-error':{title:'同步草稿保存失败',description:'改动还在当前页面。请重试同步或下载草稿。',retry:'同步',backup:true},
   failed:{title:'本机保存失败',description:'改动还在当前页面，可以重试保存或下载备份。',retry:'保存',backup:true},
   incomplete:{title:'有必填项未完成',description:'补齐当前编辑里的必填项后，会自动保存。'},
   reader:{label:'线上版',title:'当前查看线上版',description:'当前账号可以查看项目和留言。'},

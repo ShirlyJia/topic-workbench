@@ -3,7 +3,7 @@
 const versionPattern = /^\d{4}-\d{2}-\d{2}-[a-f0-9]{16}$/;
 const boardKey = 'topic-workbench-v2';
 
-async function accessDrafts(mode, operation) {
+export async function accessDrafts(mode, operation) {
   const database = await new Promise((resolve,reject) => {
     const request = indexedDB.open('topic-workbench-board-drafts',1);
     request.onupgradeneeded = () => request.result.createObjectStore('drafts');
@@ -15,7 +15,7 @@ async function accessDrafts(mode, operation) {
       const transaction = database.transaction('drafts',mode);
       const request = operation(transaction.objectStore('drafts'));
       transaction.oncomplete = () => resolve(request.result);
-      transaction.onabort = () => reject(transaction.error||Error('本机旧稿存储已中断'));
+      transaction.onabort = () => reject(transaction.error||Error('本机草稿存储已中断'));
     });
   } finally {
     database.close();

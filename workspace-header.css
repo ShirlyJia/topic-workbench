@@ -9,7 +9,7 @@
 .workspace-save-status:is([data-save-phase="saved"],[data-save-phase="synced"])::before{background:#68866b}
 .workspace-save-status:is([data-save-phase="saving"],[data-save-phase="syncing"],[data-save-phase="background"])::before{background:#607f9e}
 .workspace-save-status:is([data-save-phase="waiting"],[data-save-phase="conflict"],[data-save-phase="attention"],[data-save-phase="incomplete"],[data-save-phase="local-draft"])::before{background:#b88045}
-.workspace-save-status:is([data-save-phase="failed"],[data-save-phase="recovery"],[data-save-phase="unavailable"])::before{background:#bf584b}
+.workspace-save-status:is([data-save-phase="failed"],[data-save-phase="draft-error"],[data-save-phase="recovery"],[data-save-phase="unavailable"])::before{background:#bf584b}
 .sync-chevron{width:5px;height:5px;flex:none;margin:0 2px 2px;border:solid #88857b;border-width:0 1px 1px 0;transform:rotate(45deg)}
 .board-sync-popover{box-sizing:border-box;position:fixed;inset:44px 12px auto auto;width:min(326px,calc(100vw - 24px));padding:15px 16px;margin:0;border:1px solid #e5e4e0;border-radius:8px;background:#fff;color:#37352f;box-shadow:0 8px 24px #282d3514}
 .board-sync-popover h2{margin:0 0 6px;font-size:14px;font-weight:630}
