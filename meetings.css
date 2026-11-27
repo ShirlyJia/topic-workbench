@@ -98,7 +98,6 @@
 }
 @media(hover:none){.row-delete,.remove-material{opacity:1;pointer-events:auto}}
 .writing-section .rich-editor-input{min-height:140px;font-size:14px;line-height:1.8}
-#meetingFollowUpHost .rich-editor-input{min-height:90px}
 .writing-section .rich-editor-input img{max-width:100%;height:auto}
 
 .meeting-reader :is(#newMeeting,#createFromEmpty,#undoDelete,#openTrash,.meeting-actions,#uploadMaterial,#materialLinkForm,#projectPicker,[data-unlink-project],[data-remove-material],[data-delete-meeting],.rich-toolbar,.rich-image-tools){display:none!important}

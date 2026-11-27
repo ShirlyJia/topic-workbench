@@ -236,7 +236,6 @@ async function bootMeetings() {
   const current = () => data?.meetings.find(meeting => meeting.id === selected);
   const visibleMeetings=()=>categoryMeetings().filter(meeting=>meetingMatches(meeting,$('meetingSearch').value));
   $('meetingNotesHost').innerHTML=richEditorMarkup({label:'会议记录',placeholder:'讨论要点、已明确的结论；可直接粘贴图片…',attrs:'id="meetingNotes" data-field="notes"'});
-  $('meetingFollowUpHost').innerHTML=richEditorMarkup({label:'待跟进',placeholder:'下一步、跟进人或待补信息…',attrs:'id="meetingFollowUp" data-field="followUp"'});
   function applyAccess() {
     const allowed=editable();
     document.body.classList.toggle('meeting-reader',!allowed);
