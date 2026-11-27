@@ -22,19 +22,21 @@ function credential() {
   }
 }
 
-async function serviceRequest(path,{method='GET',token,body,unavailable='账号验证暂不可用，请稍后重试。'}={}) {
+async function serviceRequest(path,{method='GET',token,body,file,asBlob=false,timeout=12000,unavailable='账号验证暂不可用，请稍后重试。'}={}) {
   const headers = {};
   if (token) headers.Authorization = 'Bearer '+token;
   if (body) headers['Content-Type'] = 'application/json';
+  if (file) headers['Content-Type'] = file.type || 'application/octet-stream';
   let response;
   try {
-    response = await fetch(service+'/api/'+path,{method,headers,body:body && JSON.stringify(body),
-      cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(12000)});
+    response = await fetch(service+'/api/'+path,{method,headers,body:file || (body && JSON.stringify(body)),
+      cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(timeout)});
   } catch {
     throw Error(unavailable);
   }
+  if (response.ok && asBlob) return response.blob();
   const result = await response.json().catch(()=>null);
-  if (!response.ok || !result || typeof result!=='object') throw Error(result?.error || unavailable);
+  if (!response.ok || !result || typeof result!=='object') throw Object.assign(Error(result?.error || unavailable),{status:response.status,revision:result?.revision});
   return result;
 }
 
@@ -42,6 +44,10 @@ const accountRequest = (path,options) => serviceRequest('account/'+path,options)
 
 export function requestWorkbenchComments(path,options) {
   return serviceRequest(path,{...options,token:credential()?.token,unavailable:'留言暂不可用，请稍后重试。'});
+}
+
+export function requestWorkbenchWorkspace(path,options) {
+  return serviceRequest('workspace/'+path,{...options,token:credential()?.token,unavailable:'暂时连不上工作台保存服务。'});
 }
 
 export function currentWorkbenchAccount() {
@@ -101,7 +107,7 @@ function mountAccount(root) {
       identity.className = 'account-identity';
       const name = document.createElement('strong'), role = document.createElement('span');
       name.textContent = user.name;
-      role.textContent = '飞书成员';
+      role.textContent = user.role==='editor' ? '管理员' : '可留言';
       identity.append(name,role);
       summary.replaceChildren(avatar(user),identity);
     } else summary.textContent = '登录画板账号';
@@ -111,7 +117,7 @@ function mountAccount(root) {
     action.disabled = Boolean(busy);
     action.classList.toggle('sign-in',!user);
     const token = user ? verifiedToken : '';
-    if (profileToken!==token || verifiedProfile?.name!==user?.name || verifiedProfile?.avatar!==user?.avatar) {
+    if (profileToken!==token || verifiedProfile?.name!==user?.name || verifiedProfile?.avatar!==user?.avatar || verifiedProfile?.role!==user?.role) {
       profileToken = token;
       verifiedProfile = user;
       window.dispatchEvent(new Event('workbench-account-changed'));
@@ -228,12 +234,13 @@ function mountAccount(root) {
 
   render();
   const fragment = new URLSearchParams(location.hash.slice(1));
-  if (fragment.has('account_code') || fragment.has('account_error')) finishLogin(fragment.get('account_code'),fragment.get('account_error'));
-  else refresh();
+  const ready=fragment.has('account_code') || fragment.has('account_error')
+    ? finishLogin(fragment.get('account_code'),fragment.get('account_error')) : refresh();
   window.addEventListener('focus',refresh);
   window.addEventListener('storage',event=>{ if (event.key===sessionKey) refresh(); });
   document.addEventListener('visibilitychange',()=>{if (!document.hidden) refresh();});
+  return ready;
 }
 
-const root = document.getElementById('workspaceAccount');
-if (root) mountAccount(root);
+const root = globalThis.document?.getElementById('workspaceAccount');
+export const workbenchAccountReady = root ? mountAccount(root) : Promise.resolve();

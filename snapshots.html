@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="project-assignee.css?v=20261126-multi-assignees">
   <link rel="stylesheet" href="card-surfaces.css?v=20261030-two-line-previews">
   <link rel="stylesheet" href="date-styles.css?v=20261030-dates">
+  <link rel="stylesheet" href="workspace-account.css?v=20261126-account">
 </head>
 <body class="snapshot-history-page">
   <aside class="history-sidebar" aria-label="历史快照">
@@ -19,8 +20,8 @@
     <p id="snapshotListEmpty" class="history-list-empty" hidden>暂无快照</p>
   </aside>
   <main class="history-main">
-    <header class="history-header"><div><h2 id="snapshotTitle">历史快照</h2><p id="snapshotDate" class="date-text"></p></div><span class="history-readonly">只读</span><div class="history-tabs" role="tablist" aria-label="快照内容"><button id="showCanvas" disabled role="tab" aria-selected="true">画板</button><button id="showRecords" disabled role="tab" aria-selected="false">项目记录</button></div><div class="history-actions"><button id="exportSnapshot" disabled>导出</button><button id="deleteSnapshot" disabled>删除</button></div></header>
-    <p id="historyStatus" class="history-status" role="status" hidden></p>
+    <header class="history-header"><div><h2 id="snapshotTitle">历史快照</h2><p id="snapshotDate" class="date-text"></p></div><span class="history-readonly">只读</span><div class="history-tabs" role="tablist" aria-label="快照内容"><button id="showCanvas" disabled role="tab" aria-selected="true">画板</button><button id="showRecords" disabled role="tab" aria-selected="false">项目记录</button></div><div class="history-actions"><button id="exportSnapshot" disabled>导出</button><button id="deleteSnapshot" hidden disabled>删除</button></div><a id="localHistory" class="history-readonly" hidden>本机旧快照</a><div id="workspaceAccount" class="workspace-account"></div></header>
+    <p id="historyStatus" class="history-status" role="status" hidden></p><button id="historyPublishDraft" class="history-status" hidden>发布本机版本</button>
     <section id="historyWorkspace" class="history-workspace" aria-label="快照内容">
       <div id="historyViewport" class="viewport" tabindex="0" aria-label="历史画板，拖动空白处平移，按住 Command 或 Ctrl 滚轮缩放"><div id="historyWorld" class="world"></div></div>
       <section id="historyRecords" class="history-records" hidden></section>
@@ -46,6 +47,6 @@
   }
 }
   </script>
-  <script type="module" src="snapshot-history.js?v=20261126-multi-assignees"></script>
+  <script type="module" src="snapshot-history.js?v=20261127-permissions"></script>
 </body>
 </html>

@@ -1,5 +1,7 @@
 import {MEETING_CATEGORIES, meetingCategory, enrichMeetingContent} from './meeting-model.js';
-import {createMeetingFiles} from './meeting-files.js';
+import {createMeetingFiles,MAX_MEETING_FILE_BYTES} from './meeting-files.js';
+import {currentWorkbenchAccount,requestWorkbenchWorkspace,workbenchAccountReady} from './workspace-account.js?v=20261127-permissions';
+import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-permissions';
 import {removeMeetingItem, restoreMeetingItem, restoreMeetingById} from './meeting-trash.js';
 import {deployment, storageKey} from './deployment-config.js?v=20261105-editions';
 import {richEditorMarkup, mountRichEditors, readRichEditor, setRichEditor, flushRichEditors} from './rich-text.js?v=20261030-comment-interactions';
@@ -185,9 +187,45 @@ function bootMeetings() {
   const $ = id => document.getElementById(id);
   // The storage getter itself may be denied; leave the old data untouched in that case.
   const adapter = {getItem:key => globalThis.localStorage.getItem(key), setItem:(key,value) => globalThis.localStorage.setItem(key,value)};
-  const store = createMeetingStore(adapter), files=createMeetingFiles();
-  let data = null, selected = null, projects = [], projectError = '', dirty = false, timer, toastTimer, fromStorage = false, loadRevision = 0;
-  $('meetingShareNotice').hidden = !deployment.public;
+  const store=createMeetingStore(adapter),localFiles=createMeetingFiles();
+  let data=null,selected=null,projects=[],projectError='',dirty=false,timer,toastTimer,loadRevision=0;
+  let shared=null,sharedRevision='',watching=false,editableSession=false,sessionLoaded=false;
+  const editable=()=>Boolean(shared)&&canEditWorkspace();
+  const files={
+    async put(file){
+      if (!editable()) throw Error('会议资料由管理员维护。');
+      if (file.size>MAX_MEETING_FILE_BYTES) throw Error('单个附件不能超过 20 MB。');
+      const fileId=uid('meeting-file');
+      await requestWorkbenchWorkspace('files/'+fileId,{method:'PUT',file,timeout:45000});
+      return {fileId,fileName:file.name||'未命名资料',mimeType:file.type||'application/octet-stream',size:file.size};
+    },
+    async get(fileId){
+      try {return await requestWorkbenchWorkspace('files/'+encodeURIComponent(fileId),{asBlob:true});}
+      catch (reason) {
+        const local=await localFiles.get(fileId).catch(()=>null);
+        if (local || reason.status===404) return local;
+        throw reason;
+      }
+    },
+    async exportFiles(fileIds){
+      const meetings=[...data.meetings,...data.deletedMeetings.map(entry=>entry.meeting)];
+      const materials=[...meetings.flatMap(meeting=>meeting.materials),...(data.deletedItems||[]).map(entry=>entry.item)];
+      const attached=[];
+      for (const fileId of fileIds) {
+        const material=materials.find(item=>item.fileId===fileId);
+        const blob=await files.get(fileId);
+        if (!material || !blob) throw Error('备份中有附件尚未找到。');
+        const encoded=await new Promise((resolve,reject)=>{
+          const reader=new FileReader();
+          reader.onload=()=>resolve(String(reader.result).split(',')[1]);
+          reader.onerror=()=>reject(reader.error);
+          reader.readAsDataURL(blob);
+        });
+        attached.push({fileId,fileName:material.fileName,mimeType:material.mimeType,size:blob.size,data:encoded});
+      }
+      return attached;
+    }
+  };
   let activeCategory='cross-team';const remembered=new Map();
   const categoryLabel=id=>MEETING_CATEGORIES.find(c=>c.id===id)?.label||'基模-落地';
   const categoryMeetings=()=>data?data.meetings.filter(m=>meetingCategory(m)===activeCategory).sort((a,b)=>b.date.localeCompare(a.date)||b.updatedAt.localeCompare(a.updatedAt)):[];
@@ -195,7 +233,16 @@ function bootMeetings() {
   const visibleMeetings=()=>categoryMeetings().filter(meeting=>meetingMatches(meeting,$('meetingSearch').value));
   $('meetingNotesHost').innerHTML=richEditorMarkup({label:'会议记录',placeholder:'讨论要点、已明确的结论；可直接粘贴图片…',attrs:'id="meetingNotes" data-field="notes"'});
   $('meetingFollowUpHost').innerHTML=richEditorMarkup({label:'待跟进',placeholder:'下一步、跟进人或待补信息…',attrs:'id="meetingFollowUp" data-field="followUp"'});
-  mountRichEditors($('meetingEditor'),{onError:message=>toast(message)});
+  function applyAccess() {
+    const allowed=editable();
+    document.body.classList.toggle('meeting-reader',!allowed);
+    $('meetingEditor').querySelectorAll('input[data-field],input[data-material]').forEach(input=>input.readOnly=!allowed);
+    $('meetingEditor').querySelectorAll('.rich-editor-input').forEach(input=>{
+      input.contentEditable=String(allowed);
+      input.setAttribute('aria-readonly',String(!allowed));
+    });
+    $('newMeeting').disabled=!allowed || !data;
+  }
   function toast(message, action) {
     const box=$('meetingToast');box.replaceChildren();const text=document.createElement('span');text.textContent=message;box.append(text);
     if(action){const button=document.createElement('button');button.textContent='撤销';button.onclick=()=>{box.hidden=true;action();};box.append(button);}
@@ -208,8 +255,11 @@ function bootMeetings() {
     if(!flushRichEditors($('meetingEditor')))return false;
     if (!data || !dirty) return !dirty;
     try {
-      store.save(data); dirty = false; fromStorage = true;
-      status(data.meetings.some(meeting => meeting.materials.some(material => material.draftUrl)) ? '已保存 · 有待补全链接' : '已保存到此浏览器'); error(); updateFooter(); return true;
+      if (!editable()) return false;
+      validateMeetings(data);
+      shared.change(data);
+      dirty=false;
+      error();updateFooter();return true;
     } catch (failure) {
       status('未保存 · 点击重试',true);
       const message=failure.name==='QuotaExceededError'?'浏览器存储空间不足':failure.message;
@@ -218,6 +268,7 @@ function bootMeetings() {
     }
   }
   function changed(immediate = false, touchMeeting = true) {
+    if (!editable()) return false;
     dirty = true; data.updatedAt = now();
     if (touchMeeting && current()) current().updatedAt = data.updatedAt;
     status('正在保存…',true); clearTimeout(timer);
@@ -228,7 +279,7 @@ function bootMeetings() {
   function renderList() {
     document.querySelectorAll('[data-category]').forEach(button=>{const active=button.dataset.category===activeCategory;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
     $('meetingList').setAttribute('aria-labelledby',activeCategory==='cross-team'?'crossTeamTab':'internalTab');$('emptyTitle').textContent=categoryLabel(activeCategory);
-    $('emptyMessage').textContent=$('meetingSearch').value.trim()?'当前搜索下没有会议，可清空搜索或新建会议。':'还没有会议，先添加一份纪要。';
+    $('emptyMessage').textContent=$('meetingSearch').value.trim()?'当前搜索下没有匹配的会议。':editable()?'还没有会议，先添加一份纪要。':'还没有会议记录。';
     if(!data){$('meetingList').innerHTML='';$('meetingCount').textContent='读取失败';return;}
     const meetings=categoryMeetings(),matches=meetings.filter(meeting=>meetingMatches(meeting,$('meetingSearch').value));
     $('meetingCount').textContent=`${matches.length}${matches.length!==meetings.length?' / '+meetings.length:''} 条会议`;
@@ -302,7 +353,7 @@ function bootMeetings() {
   function renderEditor() {
     if($('materialPreview').open)$('materialPreview').close();releasePreview();
     const meeting = current(); $('meetingEditor').hidden = !meeting; $('emptyState').hidden = !data || !!meeting;
-    if (!meeting) return;
+    if (!meeting) {applyAccess();return;}
     for (const input of document.querySelectorAll('[data-field]')) {
       const field=input.dataset.field;
       if(input.matches('.rich-editor-input'))setRichEditor(input,{text:meeting[field],html:meeting.richText?.[field]||''});
@@ -310,7 +361,7 @@ function bootMeetings() {
     }
     $('meetingCategoryLabel').textContent=categoryLabel(meetingCategory(meeting));$('moveMeeting').textContent='移到'+categoryLabel(meetingCategory(meeting)==='cross-team'?'internal':'cross-team');$('materialLinkInput').value='';
     $('projectSearch').value = ''; $('projectPicker').open = false;
-    renderProjects(); renderMaterials(); updateFooter();
+    renderProjects(); renderMaterials(); updateFooter();applyAccess();
   }
   async function load() {
     if(!flushRichEditors($('meetingEditor')))return;
@@ -321,23 +372,66 @@ function bootMeetings() {
     $('newMeeting').disabled = true; $('exportMeetings').disabled = true; $('openTrash').disabled = true;
     $('undoDelete').disabled = true; $('exportRaw').disabled = true;
     $('meetingEditor').hidden = true; $('emptyState').hidden = true; status('正在读取…');
-    const result = await loadMeetingStore(store);
-    if (revision !== loadRevision) return;
-    data = result.data; fromStorage = result.fromStorage; dirty = false;
-    $('loadError').hidden = !result.error; $('newMeeting').disabled = !!result.error; $('exportMeetings').disabled = !!result.error;
-    $('exportRaw').disabled = store.original() === null; $('undoDelete').disabled = true;$('openTrash').disabled=!!result.error;
-    if (result.error) { $('loadErrorText').textContent = result.error; status('需要恢复',true); selected = null; }
-    else { const rows=categoryMeetings();selected=rows.some(meeting=>meeting.id===selected)?selected:rows[0]?.id||null;status(fromStorage?'已保存到此浏览器':'已就绪');if(result.migrated){dirty=true;save();} }
+    await workbenchAccountReady;
+    const remote=await readWorkspace('meetings').catch(()=>null);
+    const result=remote?{data:remote.data,error:null}:await loadMeetingStore(store);
+    if (revision!==loadRevision) return;
+    shared?.dispose();shared=null;
+    editableSession=canEditWorkspace();sessionLoaded=true;
+    if (remote && editableSession) {
+      shared=createWorkspaceSync({kind:'meetings',release:remote,draftKey:MEETING_KEY+':shared:'+currentWorkbenchAccount().name,
+        onStatus:(phase,message)=>{
+          status(message,phase!=='synced');
+          $('saveStatus').title=phase==='conflict'?'点击核对并发布本机版本':'同步会议记录';
+        },onSaved:value=>{sharedRevision=value.revision;}});
+      mountRichEditors($('meetingEditor'),{onError:message=>toast(message)});
+    }
+    sharedRevision=remote?.revision||'';
+    data=shared?.pendingData() || result.data;
+    if (data) {validateMeetings(data);data=enrichMeetingContent(data);data.deletedItems??=[];}
+    dirty=false;
+    $('loadError').hidden=!result.error;
+    $('exportMeetings').disabled=!!result.error;
+    $('legacyMeetings').hidden=adapter.getItem(MEETING_KEY)===null;
+    $('exportRaw').disabled=adapter.getItem(MEETING_KEY)===null;
+    if (result.error) {$('loadErrorText').textContent=result.error;status('需要恢复',true);selected=null;}
+    else {
+      const rows=categoryMeetings();
+      selected=rows.some(meeting=>meeting.id===selected)?selected:rows[0]?.id||null;
+      if (shared) shared.start();
+      else status(remote?'只读':'上次发布版');
+    }
+    if (!watching) {
+      watching=true;
+      watchWorkspace('meetings',()=>sharedRevision,next=>{
+        if (dirty || (shared && !shared.acceptRemote(next))) return;
+        if (!shared && canEditWorkspace()) {load();return;}
+        validateMeetings(next.data);
+        data=enrichMeetingContent(next.data);data.deletedItems??=[];
+        sharedRevision=next.revision;
+        if (!current()) selected=categoryMeetings()[0]?.id||null;
+        renderList();renderEditor();
+      });
+    }
     const linkedId=new URLSearchParams(location.search).get('meeting');
     const linked=data?.meetings.find(meeting=>meeting.id===linkedId);
     if(linked&&!result.error){selected=linked.id;activeCategory=meetingCategory(linked);}
-    refreshProjects(); renderList(); renderEditor();
+    refreshProjects();renderList();renderEditor();
+    refreshSharedProjects();
+  }
+  async function refreshSharedProjects() {
+    try {
+      const online=await readWorkspace('board');
+      projects=online.data.projects;
+      projectError='';
+      if (current()) renderProjects();
+    } catch {}
   }
   function focusTitle() {
     $('meetingTitle').focus();$('meetingEditor').scrollIntoView({block:'start',behavior:'smooth'});
   }
   function addMeeting() {
-    if (!data || !save()) return;
+    if (!editable() || !data || !save()) return;
     let meeting=categoryMeetings().find(isBlankMeeting);
     if(!meeting){
       const stamp=now();meeting={id:uid('meeting'),title:'',date:'',type:'其他',category:activeCategory,attendees:'',notes:'',conclusions:'',followUp:'',originNote:'',projectIds:[],materials:[],createdAt:stamp,updatedAt:stamp};
@@ -354,7 +448,7 @@ function bootMeetings() {
     $('trashList').innerHTML=trashEntries().map(entry=>`<div class="trash-row"><div><strong>${esc(entry.title)}</strong><small>${entry.kind==='meeting'?'会议 · '+esc(categoryLabel(meetingCategory(entry.meeting))):'资料 · '+esc(entry.meeting?.title||'未命名会议')}${entry.blocked?' · 请先恢复所属会议':''}</small></div><button data-restore-kind="${entry.kind}" data-restore-id="${esc(entry.id)}" aria-label="恢复${entry.kind==='meeting'?'会议':'资料'}：${esc(entry.title)}"${entry.blocked?' disabled':''}>恢复</button></div>`).join('')||'<p class="trash-empty">没有已删除的会议或资料</p>';
   }
   function restoreEntry(kind,id) {
-    if(!data||!save())return;
+    if(!editable()||!data||!save())return;
     try{
       let meeting,materialId;
       if(kind==='meeting'){meeting=restoreMeetingById(data,id);}
@@ -369,7 +463,7 @@ function bootMeetings() {
     }catch(failure){toast(failure.message);}
   }
   function removeMeeting(id) {
-    if(!data||!save())return;
+    if(!editable()||!data||!save())return;
     const rows=visibleMeetings(),index=rows.findIndex(m=>m.id===id),wasSelected=selected===id;
     if(!deleteMeeting(data,id))return;
     if(wasSelected)selected=rows[index+1]?.id||rows[index-1]?.id||null;
@@ -386,13 +480,19 @@ function bootMeetings() {
     } catch { if (url) URL.revokeObjectURL(url); toast('导出失败，请重试。当前内容仍在页面中。'); }
   }
   $('newMeeting').onclick = addMeeting; $('createFromEmpty').onclick = addMeeting;
-  $('saveStatus').onclick = save; $('retryLoad').onclick = load;
+  $('saveStatus').onclick=()=>{
+    if (!editable()) return;
+    if (shared.conflict()) {
+      if (window.confirm('用本机草稿更新线上会议记录？')) shared.publishDraft();
+    } else if (save()) shared.retry();
+  };
+  $('retryLoad').onclick=load;
   document.querySelectorAll('[data-category]').forEach(button=>{button.onclick=()=>switchCategory(button.dataset.category);button.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const id=e.key==='Home'?'cross-team':e.key==='End'?'internal':activeCategory==='cross-team'?'internal':'cross-team';switchCategory(id);document.querySelector('[data-category="'+id+'"]').focus();};});
-  $('moveMeeting').onclick=()=>{const meeting=current();if(!meeting||!save())return;meeting.category=meetingCategory(meeting)==='cross-team'?'internal':'cross-team';activeCategory=meeting.category;changed(true);renderEditor();};
+  $('moveMeeting').onclick=()=>{const meeting=current();if(!editable()||!meeting||!save())return;meeting.category=meetingCategory(meeting)==='cross-team'?'internal':'cross-team';activeCategory=meeting.category;changed(true);renderEditor();};
   $('meetingSearch').oninput = renderList; $('projectSearch').oninput = renderProjects;
   $('meetingList').onclick = event => { const remove=event.target.closest('[data-delete-meeting]');if(remove){removeMeeting(remove.dataset.deleteMeeting);return;}const button=event.target.closest('[data-meeting]');if(!button||!save())return;selected=button.dataset.meeting;renderList();renderEditor(); };
   $('meetingEditor').addEventListener('input',event => {
-    const meeting = current(); if (!meeting) return;
+    const meeting = current(); if (!editable() || !meeting) return;
     const field = event.target.dataset.field;
     if (field && TEXT_FIELDS.includes(field)) {
       if(event.target.matches('.rich-editor-input')){
@@ -406,38 +506,36 @@ function bootMeetings() {
       if (material && ['title','url'].includes(property)) { if (property === 'url') setMaterialURL(material,event.target.value); else material.title = event.target.value; updateMaterialState(material); changed(); }
     }
   });
-  $('projectChoices').onchange = event => { const id = event.target.dataset.project; const meeting = current(); if (!id || !meeting) return; meeting.projectIds = event.target.checked ? [...new Set([...meeting.projectIds,id])] : meeting.projectIds.filter(value => value !== id); changed(true); renderProjects(); };
-  $('linkedProjects').onclick = event => { const button = event.target.closest('[data-unlink-project]'); if (!button || !current()) return; current().projectIds = current().projectIds.filter(id => id !== button.dataset.unlinkProject); changed(true); renderProjects(); };
-  $('materialLinkForm').onsubmit=event=>{event.preventDefault();const meeting=current();if(!meeting)return;const url=safeMeetingURL($('materialLinkInput').value);if(!url){toast('请填写有效的 http 或 https 链接');return;}if(meeting.materials.some(m=>m.url===url)){toast('这份链接已在资料中');return;}const host=new URL(url).hostname;meeting.materials.push({id:uid('material'),title:host.endsWith('feishu.cn')?'飞书会议纪要':host,url});$('materialLinkInput').value='';changed(true);renderMaterials();};
-  $('uploadMaterial').onclick=()=>$('meetingFileInput').click();
+  $('projectChoices').onchange = event => { const id = event.target.dataset.project; const meeting = current(); if (!editable() || !id || !meeting) return; meeting.projectIds = event.target.checked ? [...new Set([...meeting.projectIds,id])] : meeting.projectIds.filter(value => value !== id); changed(true); renderProjects(); };
+  $('linkedProjects').onclick = event => { const button = event.target.closest('[data-unlink-project]'); if (!editable() || !button || !current()) return; current().projectIds = current().projectIds.filter(id => id !== button.dataset.unlinkProject); changed(true); renderProjects(); };
+  $('materialLinkForm').onsubmit=event=>{event.preventDefault();const meeting=current();if(!editable()||!meeting)return;const url=safeMeetingURL($('materialLinkInput').value);if(!url){toast('请填写有效的 http 或 https 链接');return;}if(meeting.materials.some(m=>m.url===url)){toast('这份链接已在资料中');return;}const host=new URL(url).hostname;meeting.materials.push({id:uid('material'),title:host.endsWith('feishu.cn')?'飞书会议纪要':host,url});$('materialLinkInput').value='';changed(true);renderMaterials();};
+  $('uploadMaterial').onclick=()=>{if(editable())$('meetingFileInput').click();};
   $('meetingFileInput').onchange=async event=>{
-    const meeting=current(),chosen=[...event.target.files];event.target.value='';if(!meeting||!chosen.length)return;
+    const meeting=current(),chosen=[...event.target.files];event.target.value='';if(!editable()||!meeting||!chosen.length)return;
     $('uploadMaterial').disabled=true;
-    try{for(const file of chosen){const metadata=await files.put(file);if(!data.meetings.includes(meeting))throw Error('会议已移除，请重新选择会议后添加文件');meeting.materials.push({id:uid('material'),title:file.name,url:'',kind:'file',...metadata});meeting.updatedAt=now();const saved=changed(true,false);if(current()===meeting)renderMaterials();if(!saved)throw Error('资料引用尚未保存，请点击顶部重试保存；文件已保留在本浏览器');}toast('资料已添加');}catch(failure){toast(failure.message||'文件保存失败');}finally{$('uploadMaterial').disabled=false;}
+    try{for(const file of chosen){const metadata=await files.put(file);if(!data.meetings.includes(meeting))throw Error('会议已移除，请重新选择会议后添加文件');meeting.materials.push({id:uid('material'),title:file.name,url:'',kind:'file',...metadata});meeting.updatedAt=now();const saved=changed(true,false);if(current()===meeting)renderMaterials();if(!saved)throw Error('资料引用尚未保存，请点击顶部重试保存；文件已保留在线上');}toast('资料已添加');}catch(failure){toast(failure.message||'文件保存失败');}finally{$('uploadMaterial').disabled=false;}
   };
   $('materialList').onclick=event=>{
     const button=event.target.closest('[data-remove-material],[data-preview-material],[data-download-material]');if(!button||!current())return;
-    if(button.dataset.removeMaterial){if(!save())return;releasePreview();const entry=removeMeetingItem(data,selected,'material',button.dataset.removeMaterial);if(!entry)return;const saved=changed(true);renderMaterials();renderTrash();if(saved)toast('资料已移到回收站',()=>restoreEntry('material',entry.id));$('materialLinkInput').focus();return;}
+    if(button.dataset.removeMaterial){if(!editable()||!save())return;releasePreview();const entry=removeMeetingItem(data,selected,'material',button.dataset.removeMaterial);if(!entry)return;const saved=changed(true);renderMaterials();renderTrash();if(saved)toast('资料已移到回收站',()=>restoreEntry('material',entry.id));$('materialLinkInput').focus();return;}
     const material=current().materials.find(m=>m.id===(button.dataset.previewMaterial||button.dataset.downloadMaterial));if(material)openMaterial(material,!!button.dataset.downloadMaterial);
   };
   $('closePreview').onclick=()=>$('materialPreview').close();$('materialPreview').onclose=releasePreview;
   $('deleteMeeting').onclick=()=>{if(current())removeMeeting(selected);};
   $('undoDelete').onclick=()=>{const entry=trashEntries()[0];if(entry)restoreEntry(entry.kind,entry.id);};
-  $('openTrash').onclick=()=>{renderTrash();$('meetingTrash').showModal();};
+  $('openTrash').onclick=()=>{if(editable()){renderTrash();$('meetingTrash').showModal();}};
   $('closeTrash').onclick=()=>$('meetingTrash').close();
   $('trashList').onclick=event=>{const button=event.target.closest('[data-restore-id]');if(button)restoreEntry(button.dataset.restoreKind,button.dataset.restoreId);};
   $('exportMeetings').onclick=async()=>{if(!data||!flushRichEditors($('meetingEditor')))return;try{const backup=clone(data),ids=deletedMeetingFileIds(backup);if(ids.length)backup.embeddedFiles=await files.exportFiles(ids);download(backup,`会议记录${dirty?'-未保存草稿':''}-${new Date().toISOString().slice(0,10)}.json`);}catch(failure){toast('导出未完成：'+failure.message);}};
-  $('exportRaw').onclick = () => { const raw = store.original(); if (raw !== null) download(raw,'会议记录-原始备份.json'); };
+  $('exportRaw').onclick=$('legacyMeetings').onclick=()=>{
+    const raw=adapter.getItem(MEETING_KEY);if(raw!==null)download(raw,'会议记录-本机备份.json');
+  };
   document.addEventListener('click',event=>{const link=event.target.closest('a[href]');if(link&&link.target!=='_blank'&&!link.hasAttribute('download')&&!link.getAttribute('href').startsWith('#')&&!save())event.preventDefault();});
-  window.addEventListener('beforeunload',event => { if (!flushRichEditors($('meetingEditor')) || dirty && !save()) { event.preventDefault(); event.returnValue = ''; } });
+  window.addEventListener('beforeunload',event => { if (editable() && (!flushRichEditors($('meetingEditor')) || dirty && !save() || shared.pending())) { event.preventDefault(); event.returnValue = ''; } });
   document.addEventListener('visibilitychange',() => { if (document.visibilityState === 'hidden') save(); });
-  window.addEventListener('focus',refreshProjects);
-  window.addEventListener('storage',event => {
-    if (event.key === PROJECT_KEY || event.key === storageKey('topic-workbench-live-v1') || event.key === null) refreshProjects();
-    if (event.key === MEETING_KEY || event.key === null) {
-      if (dirty || !flushRichEditors($('meetingEditor'))) { clearTimeout(timer); status('未保存 · 检测到其他页面更改',true); error('另一个页面修改了会议记录。当前草稿已保留，请导出后再刷新页面合并。'); }
-      else load();
-    }
+  window.addEventListener('focus',refreshSharedProjects);
+  window.addEventListener('workbench-account-changed',()=>{
+    if (sessionLoaded && editableSession!==canEditWorkspace()) {shared?.dispose();location.reload();}
   });
   load();
 }

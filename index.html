@@ -36,7 +36,7 @@
   <link rel="stylesheet" href="action-board.css?v=20261123-action-focus">
   <link rel="stylesheet" href="global-search.css?v=20261117-mobile">
 </head>
-<body>
+<body class="board-reader">
   <a class="sr-only skip-link" href="#viewport">跳到画板</a>
   <button id="sidebarBackdrop" class="sidebar-backdrop" aria-label="收起导航" hidden></button>
   <aside class="sidebar" aria-label="工作台导航">
@@ -142,7 +142,7 @@
   <dialog id="editorDialog" class="editor-dialog"><form id="editorForm"><header class="editor-head"><h2 id="editorTitle"></h2><button type="button" data-close-editor aria-label="关闭编辑">×</button></header><div id="editorFields"></div><p id="editorError" class="form-error" role="alert" hidden></p><footer class="dialog-actions"><button type="button" data-close-editor>取消</button><button id="editorSubmit" class="primary" type="submit">保存</button></footer></form></dialog>
   <dialog id="tagDialog" class="editor-dialog"><header class="editor-head"><h2>管理分类标签</h2><button id="closeTags" aria-label="关闭标签管理">×</button></header><form id="newTagForm" class="inline-form"><label class="sr-only" for="newTagName">新标签名称</label><input id="newTagName" placeholder="新标签名称" maxlength="40" required><span id="newTagColorControl"></span><button class="primary" type="submit">新增</button></form><div id="tagRows"></div><p class="muted">删除后可用顶部「撤销」恢复。</p></dialog>
   <dialog id="previewDialog" class="preview-dialog"><header class="editor-head"><h2 id="previewTitle">资料</h2><div><a id="previewOriginal" target="_blank" rel="noopener noreferrer">打开原文 ↗</a><button id="closePreview" aria-label="关闭资料预览">×</button></div></header><p class="muted">如受登录或网站限制未能显示，请打开原文查看、编辑。</p><iframe id="previewFrame" title="资料预览" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" referrerpolicy="no-referrer"></iframe></dialog>
-  <dialog id="settingsDialog" class="workspace-settings"><header><h2>数据与备份</h2><button id="closeSettings" aria-label="关闭设置">×</button></header><p>画板先保存在本机；连接自动同步后，修改会发布到原网址。</p><p>快照仅存本机；会议记录独立维护。</p><div class="settings-links"><button id="exportData" class="primary">导出备份</button><a href="snapshots.html">查看历史快照 →</a></div></dialog>
+  <dialog id="settingsDialog" class="workspace-settings"><header><h2>数据与备份</h2><button id="closeSettings" aria-label="关闭设置">×</button></header><p>管理员的修改会自动保存到线上，成员登录后可留言。</p><div class="settings-links"><button id="exportData" class="primary">导出备份</button><a href="snapshots.html">查看历史快照 →</a></div></dialog>
   <script type="importmap">
     {
   "imports": {
@@ -170,7 +170,7 @@
   }
 }
   </script>
-  <script type="module" src="app.js?v=20261127-frozen-child"></script>
-  <script type="module" src="workspace-account.js?v=20261126-signed-comments"></script>
+  <script type="module" src="app.js?v=20261127-permissions"></script>
+  <script type="module" src="workspace-account.js?v=20261127-permissions"></script>
 </body>
 </html>

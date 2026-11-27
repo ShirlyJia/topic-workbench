@@ -1,14 +1,16 @@
 import {applyViewerMode,removeRetiredSession} from './viewer-mode.js';
 import {buildSearchIndex,matchesKeywords} from './global-search.js?v=20261126-multi-assignees';
 import {mountGlobalSearch} from './global-search-view.js';
-import {createMeetingStore,loadMeetingStore} from './meetings.js?v=20261117-global-search';
+import {createMeetingStore,loadMeetingStore} from './meetings.js?v=20261127-permissions';
 import {createCanvasEditor} from './canvas-editor.js?v=20261030-detail';
 import {canvasItemBounds, translateCanvasItem, restoreYellowNotes} from './canvas-items.js?v=20261030-detail';
 import {enrichProjectContent} from './project-content.js';
 import {orderedComments,moveComment,setCommentPinned,mountCommentSorting} from './comment-order.js';
 import {DETAIL_SECTION_TITLES, detailLayout, detailSectionTitle, visibleDetailSections, moveDetailSection, setDetailSectionHidden, renameDetailSection, removeCustomSection, restoreCustomSection} from './project-detail-layout.js';
 import {applyDomainTags} from './category-tags.js';
-import {createSnapshotStore} from './snapshot-store.js';
+import {openSharedSnapshots} from './shared-snapshots.js?v=20261127-permissions';
+import {currentWorkbenchAccount,workbenchAccountReady} from './workspace-account.js?v=20261127-permissions';
+import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-permissions';
 import {findScheduleConflicts,findContentOverlaps} from './workbench-review.js?v=20261102-workdays';
 import { enrichWorkbench, isClosedProject, sortProjectsByPriority, collectDirectionResults, syncFrameBoards } from './workbench-model.js';
 import { createWorkbenchViews, colorControl } from './workbench-views.js?v=20261102-results';
@@ -17,7 +19,7 @@ import { detachSourceMetadata } from './source-detach.js';
 import { displayPriority, visibleNodes, nodeStatus, displayDescription } from './presentation.js';
 import {boardPublication, deployment, storageKey, useBoardEdition} from './deployment-config.js?v=20261105-editions';
 import {showBoardCopies} from './board-publication.js';
-import {SYNC_ORIGIN,isOlderThanLiveBaseline, loadSharedBoard, mountAutoSync, newerSharedBoard, prepareLiveStorage, readLiveBaseline, validateRelease, watchSharedBoard} from './auto-sync.js?v=20261125-workbench-repo';
+import {SYNC_ORIGIN,boardFingerprint,loadSharedBoard,newerSharedBoard,prepareLiveStorage,rememberLiveBaseline,validateRelease} from './auto-sync.js?v=20261125-workbench-repo';
 import {richEditorMarkup, mountRichEditors, readRichEditor, richHTML, richHasContent, flushRichEditors, destroyRichEditors} from './rich-text.js?v=20261030-card-preview';
 import {frozenNote,saveFrozenNote} from './frozen-note.js';
 import {freezeCommentPickerMarkup,mountFreezeCommentPickers} from './freeze-comment-picker.js';
@@ -42,7 +44,7 @@ import {referenceLinesMarkup, clonePlacement, removePlacement} from './canvas-re
 import {fitCardPreviews} from './card-preview.js?v=20261030-two-line-previews';
 import {createProjectList} from './project-list.js?v=20261030-grouped-list';
 import {directionFocusModel,directionIcon} from './direction-focus.js?v=20261030-direction2';
-import {createSignedComments} from './signed-comments.js?v=20261126-signed-comments';
+import {createSignedComments} from './signed-comments.js?v=20261127-permissions';
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -70,11 +72,17 @@ const saveStatusLabels={
   waiting:'待同步',conflict:'同步冲突',attention:'同步待处理',failed:'保存失败',
   incomplete:'待补齐',reader:'公开浏览',recovery:'需要恢复',unavailable:'未载入'
 };
-let cloudSync = null;
-let localMaintainer = !deployment.public, globalSearch = null, searchMeetings = [], searchEntries = [], searchMeetingStatus = '正在读取会议记录…', projectSearchText = new Map();
-const canMaintain = () => localMaintainer;
+let cloudSync = null, directoryConnection = '';
+let localMaintainer = false, globalSearch = null, searchMeetings = [], searchEntries = [], searchMeetingStatus = '正在读取会议记录…', projectSearchText = new Map();
+const canMaintain = () => localMaintainer && canEditWorkspace();
 function refreshSearchIndex(){searchEntries=buildSearchIndex(state,searchMeetings);projectSearchText=new Map(searchEntries.filter(r=>r.type==='project').map(r=>[r.id,r.text]));}
-async function refreshSearchMeetings(){const result=await loadMeetingStore(createMeetingStore(localStorage),(url,options)=>fetch(url,{...options,signal:AbortSignal.timeout(6000)}));searchMeetings=result.data?.meetings||[];searchMeetingStatus=result.error?'会议记录暂未载入，请稍后重新搜索':'';refreshSearchIndex();globalSearch?.refresh();}
+async function refreshSearchMeetings(){
+  const shared=await readWorkspace('meetings').catch(()=>null);
+  const result=shared?{data:shared.data}:await loadMeetingStore(createMeetingStore(localStorage),(url,options)=>fetch(url,{...options,signal:AbortSignal.timeout(6000)}));
+  searchMeetings=result.data?.meetings||[];
+  searchMeetingStatus=result.error?'会议记录暂未载入，请稍后重新搜索':'';
+  refreshSearchIndex();globalSearch?.refresh();
+}
 let storage = createPersistence({key:storageKey('topic-workbench-v2'),onStatus: result => {
   if (result?.ok === false || result?.success === false) setSaveStatus(false);
 }});
@@ -108,14 +116,14 @@ function setOnlineSaveStatus(phase,message){
   onlineSaveStatus={phase,message};
   refreshSaveStatus();
 }
-function save(history = true) {
+function save(history = true, {publish=true}={}) {
   if(!canMaintain()){localSavePhase='reader';refreshSaveStatus();return true;}
   clearTimeout(viewSaveTimer);
   viewSaveTimer = 0;
   try {
     const synced=syncFrameBoards(state),recordHistory=history||dirty;
     storage.commit(documentData(),{recordHistory});
-    cloudSync?.changed(documentData());
+    if (publish) cloudSync?.change(documentData());
     if(recordHistory)$('toast').querySelector('[data-undo-latest]')?.remove();
     if(synced)workbench?.renderNav();
     setSaveStatus(true);$('undo').disabled=!storage.canUndo();
@@ -839,7 +847,7 @@ function undoWithDeliveryHistory(event){
         recordDeliveryLifecycle(next,current,{actor});reconcileDelivery(next);return next;
       }});
       if(!prev)return false;
-      restoreData(prev);cloudSync?.changed(documentData());state.selected.clear();state.selectedFrames.clear();if(!byId[state.detail]){state.detail=null;state.detailInstance=null;$('detail').hidden=true;}renderAll();setSaveStatus(true);$('undo').disabled=!storage.canUndo();if($('tagDialog').open)tagRows();toast(preview.requiresReason?'已撤销，交付历史保留':'已撤销');return true;
+      restoreData(prev);cloudSync?.change(documentData());state.selected.clear();state.selectedFrames.clear();if(!byId[state.detail]){state.detail=null;state.detailInstance=null;$('detail').hidden=true;}renderAll();setSaveStatus(true);$('undo').disabled=!storage.canUndo();if($('tagDialog').open)tagRows();toast(preview.requiresReason?'已撤销，交付历史保留':'已撤销');return true;
     };
     if(preview.requiresReason){
       editor('撤销交付变更','<p class="muted">这次撤销涉及交付日期或记录。填写原因后撤销，原记录继续保留。</p><ul class="delivery-undo-list">'+preview.changes.map(c=>'<li>'+esc(c.projectName)+' · '+esc(c.nodeTitle||'未命名计划')+(c.fromDate||c.toDate?'：'+(c.fromDate?'<time>'+esc(c.fromDate)+'</time>':'未设置')+' → '+(c.toDate?'<time>'+esc(c.toDate)+'</time>':'未设置'):'')+'</li>').join('')+'</ul>'+area('reason','撤销理由')+field('actor','记录人（选填）'),f=>{const reason=f.get('reason').trim();if(!reason)throw Error('请填写撤销理由');return apply(reason,f.get('actor').trim());},'撤销并留档');
@@ -962,9 +970,17 @@ function bindInlineEditing(){
 }
 
 function toggleSidebar(force){if(mobile()){const open=typeof force==='boolean'?force:!document.body.classList.contains('sidebar-open');document.body.classList.toggle('sidebar-open',open);$('sidebarBackdrop').hidden=!open;$('toggleSidebar').setAttribute('aria-expanded',String(open));}else{const open=typeof force==='boolean'?force:document.body.classList.contains('sidebar-collapsed');document.body.classList.toggle('sidebar-collapsed',!open);$('toggleSidebar').setAttribute('aria-expanded',String(open));}}
-const snapshots = createSnapshotStore({key:storageKey('topic-workbench-snapshots-v1')});
-function snapshotsPanel(){
-  try{snapshots.list();const date=new Date().toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});editor('保存快照',field('snapshotName','名称','画板 · '+date,'text','required')+'<a class="text-action" href="snapshots.html">查看历史快照 →</a>',f=>{if(!flushInline())return false;const name=f.get('snapshotName').trim();if(reconcileDelivery(state))save(false);const snap=snapshots.capture(name,documentData());toast('快照已保存');const link=document.createElement('a');link.href='snapshots.html?snapshot='+encodeURIComponent(snap.id);link.textContent='查看';link.className='toast-undo';$('toast').append(link);},'保存');}catch(error){toast(error.message);}
+let snapshots, snapshotSync;
+async function snapshotsPanel(){
+  if (!canMaintain()) return;
+  try {
+    if (!snapshots) {
+      const online=await openSharedSnapshots({onStatus:(phase,message)=>{if(['conflict','attention'].includes(phase))toast(message);}});
+      if (!online) return;
+      ({store:snapshots,sync:snapshotSync}=online);
+    }
+  } catch(error) {toast(error.message);return;}
+  try{snapshots.list();const date=new Date().toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});editor('保存快照',field('snapshotName','名称','画板 · '+date,'text','required')+'<a class="text-action" href="snapshots.html">查看历史快照 →</a>',f=>{if(!flushInline())return false;const name=f.get('snapshotName').trim();if(reconcileDelivery(state))save(false);const snap=snapshots.capture(name,documentData());toast(snapshotSync?.pending()?'快照待同步':'快照已保存');const link=document.createElement('a');link.href='snapshots.html?snapshot='+encodeURIComponent(snap.id);link.textContent='查看';link.className='toast-undo';$('toast').append(link);},'保存');}catch(error){toast(error.message);}
 }
 function snapshotPreview(id){location.href='snapshots.html?snapshot='+encodeURIComponent(id);}
 function reviewPanel(){
@@ -1010,8 +1026,8 @@ if(canMaintain())mountAssigneePicker({
     }
     return [...counts.values()].sort((first,second)=>second.count-first.count).slice(0,8).map(row=>row.person);
   },
-  lookup:(query,signal)=>lookupFeishuAssignees(SYNC_ORIGIN,cloudSync?.connection(),query,signal),
-  lookupAvatars:refs=>lookupFeishuAvatars(SYNC_ORIGIN,cloudSync?.connection(),refs),
+  lookup:(query,signal)=>lookupFeishuAssignees(SYNC_ORIGIN,directoryConnection,query,signal),
+  lookupAvatars:refs=>lookupFeishuAvatars(SYNC_ORIGIN,directoryConnection,refs),
   assign:(pid,people)=>{
     if(state.detail!==pid||!flushInline())return false;
     return mutate(()=>{
@@ -1044,10 +1060,10 @@ for(const [id,edge] of [['bringFrameFront','front'],['sendFrameBack','back']])$(
 mountDetailResize({panel:$('detail'),handle:$('detailResize'),container:document.querySelector('.workspace'),key:storageKey('topic-workbench-detail-width'),onResize:()=>{document.querySelector('.app-shell').style.setProperty('--detail-width',$('detail').style.getPropertyValue('--detail-width'));if(state?.detail)resizeInlineFields();}});
 bindDetailNavigation($('detailBody'));$('detailBack').addEventListener('click',goBackDetail);bindInlineEditing();bindProjectContent();bindHoverMenus();bindDeliveryActions();$('jumpComments').addEventListener('click',()=>{if(!flushInline())return;const p=byId[state.detail];if(p&&detailLayout(p).hidden.includes('comments'))mutate(()=>setDetailSectionHidden(p,'comments',false));const composer=$('detailBody').querySelector('[data-signed-new],#commentForm:not([hidden]),[data-signed-login]');(composer||$('detailBody').querySelector('.comment-entries'))?.scrollIntoView({block:'center',behavior:'smooth'});(composer?.querySelector('.rich-editor-input')||composer)?.focus({preventScroll:true});});$('detailSaveStatus').addEventListener('click',()=>{if(flushInline())save(false);});
 $('snapshots').addEventListener('click',snapshotsPanel);$('reviewIssues').addEventListener('click',reviewPanel);
-document.addEventListener('click',e=>{const b=e.target.closest('[data-snapshot-read],[data-snapshot-export],[data-snapshot-delete],[data-review-project]');if(!b)return;try{if(b.hasAttribute('data-snapshot-read'))snapshotPreview(b.dataset.snapshotRead);if(b.hasAttribute('data-snapshot-export'))storage.download(snapshots.export(b.dataset.snapshotExport));if(b.hasAttribute('data-snapshot-delete')){const id=b.dataset.snapshotDelete;editor('删除快照','<p>仅删除这份历史快照，当前项目和布局保留。</p>',()=>{snapshots.remove(id);toast('快照已删除');},'确认删除');}if(b.hasAttribute('data-review-project')){$('editorDialog').close();openDetail(b.dataset.reviewProject);}}catch(error){toast(error.message);}});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-snapshot-read],[data-snapshot-export],[data-snapshot-delete],[data-review-project]');if(!b||!canMaintain())return;try{if(b.hasAttribute('data-snapshot-read'))snapshotPreview(b.dataset.snapshotRead);if(b.hasAttribute('data-snapshot-export'))storage.download(snapshots.export(b.dataset.snapshotExport));if(b.hasAttribute('data-snapshot-delete')){const id=b.dataset.snapshotDelete;editor('删除快照','<p>仅删除这份历史快照，当前项目和布局保留。</p>',()=>{snapshots.remove(id);toast('快照已删除');},'确认删除');}if(b.hasAttribute('data-review-project')){$('editorDialog').close();openDetail(b.dataset.reviewProject);}}catch(error){toast(error.message);}});
 
 document.addEventListener('click',e=>{const direction=e.target.closest('[data-focus-direction]');if(direction){if(clickSuppressed)return;const id=direction.dataset.focusDirection;if(!['canvas','list'].includes(state.display))navigate('canvas');setDirectionFocus(state.focusDirection===id?'':id);return;}const parent=e.target.closest('[data-card-parent]');if(parent){openDetail(parent.dataset.cardParent);return;}const child=e.target.closest('[data-open-children]');if(child&&!child.closest('#world')){showChildren(child.dataset.openChildren);return;}const b=e.target.closest('[data-open]');if(b&&!b.closest('#world'))openDetail(b.dataset.open);});
-window.addEventListener('beforeunload',e=>{if(!flushInline()||!flushRichEditors($('editorFields'))||dirty||cloudSync?.awaitingHandoff()){e.preventDefault();e.returnValue='';}});
+window.addEventListener('beforeunload',e=>{if(!flushInline()||!flushRichEditors($('editorFields'))||dirty||(canMaintain()&&cloudSync?.pending())){e.preventDefault();e.returnValue='';}});
 $('toggleSidebar').addEventListener('click',()=>toggleSidebar());$('collapseSidebar').addEventListener('click',()=>toggleSidebar(false));$('sidebarBackdrop').addEventListener('click',()=>toggleSidebar(false));
 $('canvasView').addEventListener('click',()=>navigate('canvas'));$('listView').addEventListener('click',()=>navigate('list'));$('canvasNav').addEventListener('click',()=>navigate('canvas'));$('resultsNav').addEventListener('click',()=>navigate('results'));$('deliveryNav').addEventListener('click',()=>navigate('delivery'));
 $('frameNav').addEventListener('change',e => {
@@ -1385,42 +1401,57 @@ function updatePublicBoard(release, cacheKey) {
 async function boot(){
  try {
   const syncKey = storageKey('topic-workbench-auto-sync');
-  let connection = '';
-  try { connection = localStorage.getItem(syncKey + ':connection') || ''; } catch {}
-  localMaintainer=Boolean(connection)||!deployment.public;
-  document.body.classList.toggle('board-reader',!canMaintain());
+  try { directoryConnection=localStorage.getItem(syncKey+':connection')||''; } catch {}
   removeRetiredSession({local:localStorage,session:sessionStorage,location,history});
-  const publicCopyKey=syncKey+':public-copy',liveKey=storageKey('topic-workbench-live-v1');
-  const cached=!canMaintain()?readPublishedCopy(publicCopyKey):null;
-  const fromNetwork=await loadSharedBoard({connection,publicSite:deployment.public});
-  const release=canMaintain() && isOlderThanLiveBaseline(localStorage,liveKey,fromNetwork)
-    ? null : newerSharedBoard(cached,fromNetwork)?fromNetwork:cached;
-  if (release) useBoardEdition(release.updatedAt.slice(0,10) + '-' + release.revision.slice(0,16));
-  const live = release && (!boardPublication.edition || boardPublication.active === boardPublication.edition);
-  const fallbackLive = !release && !new URLSearchParams(location.search).has('draft') && localStorage.getItem(liveKey);
-  const dataKey = live || fallbackLive ? liveKey : storageKey('topic-workbench-v2');
-  if (live && canMaintain()) await prepareLiveStorage({storage:localStorage,key:dataKey,
+  const publicCopyKey=syncKey+':public-copy',dataKey=storageKey('topic-workbench-live-v1');
+  const [,workspace]=await Promise.all([workbenchAccountReady,readWorkspace('board').catch(()=>null)]);
+  let boardOnline=Boolean(workspace);
+  const asRelease=value=>validateRelease({...value,board:value.data});
+  const cached=readPublishedCopy(publicCopyKey);
+  const legacy=workspace?null:await loadSharedBoard({publicSite:deployment.public});
+  let release=workspace?asRelease(workspace):newerSharedBoard(cached,legacy)?legacy:cached;
+  if (release) useBoardEdition(release.updatedAt.slice(0,10)+'-'+release.revision.slice(0,16));
+  const liveEdition=!boardPublication.edition||boardPublication.active===boardPublication.edition;
+  localMaintainer=Boolean(workspace)&&canEditWorkspace()&&liveEdition;
+  document.body.classList.toggle('board-reader',!canMaintain());
+  if (localMaintainer) await prepareLiveStorage({storage:localStorage,key:dataKey,
     archivePrefix:(deployment.public?deployment.namespace+':':'')+'topic-workbench-v2',release});
-  storage = createPersistence({key:dataKey,onStatus:result=>{
-    if (result?.ok === false) setSaveStatus(false);
-  }});
-  const seedUrl = boardPublication.edition ? './initial-data.json?v=' + boardPublication.edition : './initial-data.json';
-  let seed = release?.board;
-  if (!seed && canMaintain() && fallbackLive) {
-    try { seed=JSON.parse(fallbackLive); storage.validate(seed); } catch { seed=null; }
-  }
+  storage=createPersistence({key:dataKey,onStatus:result=>{if(result?.ok===false)setSaveStatus(false);}});
+  let seed=release?.board;
   if (!seed) {
-    const response = await fetch(seedUrl, {cache:'no-cache'});
+    const response=await fetch('./initial-data.json',{cache:'no-cache'});
     if (!response.ok) throw Error('初始项目尚未就绪');
-    seed = await response.json();
+    seed=await response.json();
   }
-  if (!canMaintain()) storage.validate(seed);
-  const loaded=canMaintain()?storage.load(seed):{data:seed,fromStorage:false,error:null};
-  if (canMaintain() && (!boardPublication.edition || boardPublication.active === boardPublication.edition)) {
-    cloudSync = mountAutoSync({key:syncKey,release,dataKey,getData:documentData,notify:toast,onPublished:showPublicationTime,onStatus:setOnlineSaveStatus});
-    if (cloudSync.pendingBoard()) {
-      storage.validate(cloudSync.pendingBoard());
-      loaded.data = cloudSync.pendingBoard();
+  storage.validate(seed);
+  const loaded=localMaintainer?storage.load(seed):{data:seed,fromStorage:false,error:null};
+  if (localMaintainer) {
+    const settings=$('settingsDialog').querySelector('.settings-links');
+    const message=document.createElement('p'),publish=document.createElement('button');
+    const retry=document.createElement('button');
+    retry.textContent='重试同步';retry.hidden=true;
+    publish.textContent='发布本机版本';publish.hidden=true;
+    settings.prepend(message,retry,publish);
+    cloudSync=createWorkspaceSync({kind:'board',release:{...release,data:normalizeBoard(seed)},fingerprint:boardFingerprint,
+      draftKey:dataKey+':shared:'+currentWorkbenchAccount().name,
+      onStatus:(phase,info)=>{
+        setOnlineSaveStatus(phase,info);
+        message.textContent=info;
+        retry.hidden=!['attention','waiting'].includes(phase);
+        publish.hidden=phase!=='conflict';
+      },
+      onSaved:value=>{
+        release=asRelease(value);
+        rememberLiveBaseline(localStorage,dataKey,release).catch(()=>{});
+        showPublicationTime(release);cachePublishedCopy(publicCopyKey,release);
+      }});
+    retry.onclick=()=>cloudSync.retry();
+    publish.onclick=()=>{
+      if (window.confirm('用这份本机草稿更新线上画板？')) cloudSync.publishDraft();
+    };
+    if (cloudSync.pendingData()) {
+      storage.validate(cloudSync.pendingData());
+      loaded.data=cloudSync.pendingData();
     }
   }
   if(loaded.error){$('loadCaption').textContent='本地记录读取失败，原记录已保留';localSavePhase='recovery';refreshSaveStatus();$('world').innerHTML='<div class="load-error"><h2>本地记录暂时无法读取</h2><p>'+esc(loaded.error)+'</p><p>原记录已保留。先导出原始备份，再处理恢复。</p><button id="downloadRaw">导出原始记录</button></div>';$('downloadRaw').onclick=()=>storage.download(localStorage.getItem(dataKey));return;}
@@ -1434,19 +1465,30 @@ async function boot(){
   deliveryController=createDeliveryController({getState:()=>state,mutate,flush:flushInline,editor,field,area,check,openProject:openDetail,navigate,toast,storageKey});
   indexData();canvasEditor=createCanvasEditor({world,viewport,getState:()=>state,mutate,save,toWorld,setTool,isPanning:e=>space||state.tool==='pan'||e.button===1,clearProjects:()=>{state.selected.clear();state.selectedFrames.clear();renderSelection();},closeDetail,toast,onEditing:()=>{dirty=true;refreshSaveStatus();}});workbench=createWorkbenchViews({getState:()=>state,update:mutate,openProject:openDetail,priorityControl,canMaintain,navigate,editor,field,area,matches,commitInline,notify:toast,afterRender:syncActiveProject});projectList=createProjectList({root:$('mobileList'),getData:()=>state,cardElement,openProject:openDetail,matches,beforeChange:flushInline,onFilterChange:()=>{renderTags();applyFilter();renderSelection();},key:storageKey('topic-workbench-list-view-v1'),notify:toast});bindEvents();
   const compact=matchMedia('(min-width:761px) and (max-width:1100px)').matches;if(compact)document.body.classList.add('sidebar-collapsed');
-  renderAll();setDisplay(state.display);save(loaded.fromStorage&&!loaded.data.frameBoardSyncVersion&&data.quickBoards.some(board=>board.sourceFrameId));
-  localStorage.setItem(storageKey('topic-workbench-active-key'),dataKey);
-  if (live) showPublicationTime(release);
-  else if (fallbackLive && canMaintain()) showPublicationTime(readLiveBaseline(localStorage,liveKey));
+  renderAll();setDisplay(state.display);save(loaded.fromStorage&&!loaded.data.frameBoardSyncVersion&&data.quickBoards.some(board=>board.sourceFrameId),{publish:false});
+  if (canMaintain()) localStorage.setItem(storageKey('topic-workbench-active-key'),dataKey);
+  if (release) showPublicationTime(release);
+  if (boardOnline && release) cachePublishedCopy(publicCopyKey,release);
   cloudSync?.start();
   refreshSearchMeetings();
-  if (deployment.public && !fromNetwork) toast('最新线上画板暂时无法读取，当前显示上次发布版');
-  if (deployment.public && !canMaintain() && boardPublication.active===boardPublication.edition) {
-    if (fromNetwork && release===fromNetwork) cachePublishedCopy(publicCopyKey,release);
-    watchSharedBoard({release,apply:next=>updatePublicBoard(next,publicCopyKey)});
-  }
-  showBoardCopies($('settingsDialog').querySelector('.settings-links'), boardPublication);
-  try { snapshots.list(); } catch(error) { toast(error.message); }
+  if (!boardOnline) toast('线上服务暂不可用，当前显示上次发布版');
+  if (liveEdition) watchWorkspace('board',()=>boardOnline?(release?.revision||''):'',next=>{
+    if (!boardOnline && canEditWorkspace()) {location.reload();return;}
+    if (cloudSync && (dirty||document.querySelector(pendingInputs)||!cloudSync.acceptRemote({...next,data:normalizeBoard(next.data)}))) return;
+    release=asRelease(next);boardOnline=true;
+    updatePublicBoard(release,publicCopyKey);
+    if (canMaintain()) {
+      storage.commit(documentData(),{recordHistory:false});
+      rememberLiveBaseline(localStorage,dataKey,release).catch(()=>{});
+    }
+  });
+  window.addEventListener('workbench-account-changed',()=>{
+    if (liveEdition && localMaintainer!==canEditWorkspace()) {
+      cloudSync?.dispose();
+      location.reload();
+    }
+  });
+  showBoardCopies($('settingsDialog').querySelector('.settings-links'),boardPublication);
   const linkedProject=new URLSearchParams(location.search).get('project');if(linkedProject&&byId[linkedProject])openDetail(linkedProject);
   $('toggleSidebar').setAttribute('aria-expanded',String(!mobile()&&!compact));
  }catch(error){$('loadCaption').textContent='载入失败：'+error.message;localSavePhase='unavailable';refreshSaveStatus();world.innerHTML='<div class="load-error"><h2>项目暂时无法载入</h2><p>'+esc(error.message)+'</p><button onclick="location.reload()">重新载入</button></div>';}

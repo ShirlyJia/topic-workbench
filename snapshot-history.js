@@ -1,4 +1,6 @@
-import {createSnapshotStore} from './snapshot-store.js';
+import {localSnapshots,openSharedSnapshots} from './shared-snapshots.js?v=20261127-permissions';
+import {workbenchAccountReady} from './workspace-account.js?v=20261127-permissions';
+import {canEditWorkspace} from './workspace-sync.js?v=20261127-permissions';
 import {storageKey} from './deployment-config.js';
 import {snapshotCanvasModel, snapshotCardMarkup, snapshotFrameMarkup} from './snapshot-canvas.js?v=20261126-multi-assignees';
 import {renderSnapshotProjectDetails, renderSnapshotRecords} from './snapshot-preview.js?v=20261126-multi-assignees';
@@ -8,13 +10,15 @@ import {fitCardPreviews} from './card-preview.js?v=20261030-two-line-previews';
 import {mountDetailResize} from './detail-panel.js';
 
 const $=id=>document.getElementById(id),viewport=$('historyViewport'),world=$('historyWorld');
-const store=createSnapshotStore({key:storageKey('topic-workbench-snapshots-v1')});
+const legacy=localSnapshots();
+let store=legacy,shared=null,editorSession=false;
 let rows=[],snapshot=null,model=null,selectedId='',view={x:0,y:0,z:1},drag=null,activePid='',records=false,pendingDeleteId='';
 const color=value=>/^#[0-9a-f]{6}$/i.test(value||'')?value:'#b8afa0';
 const formatDate=value=>new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 
 function selectionControls(enabled){
-  for(const id of ['showCanvas','showRecords','exportSnapshot','deleteSnapshot'])$(id).disabled=!enabled;
+  for(const id of ['showCanvas','showRecords','exportSnapshot'])$(id).disabled=!enabled;
+  $('deleteSnapshot').disabled=!enabled||!shared||!canEditWorkspace();
 }
 function emptySelection(title,text){
   snapshot=null;model=null;selectedId='';activePid='';records=false;drag=null;world.replaceChildren();$('historyRecords').replaceChildren();$('historyRecords').hidden=true;viewport.hidden=false;viewport.classList.remove('history-panning');$('historyDetail').hidden=true;
@@ -92,13 +96,13 @@ $('exportSnapshot').addEventListener('click',()=>{
   try{const content=store.export(selectedId),blob=new Blob([content],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=('画板快照-'+snapshot.name).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);status('已导出快照');}
   catch(error){if(error.code==='SNAPSHOT_NOT_FOUND')showMissing();status('导出失败：'+error.message);}
 });
-$('deleteSnapshot').addEventListener('click',()=>{if(!snapshot)return;pendingDeleteId=selectedId;$('deleteSnapshotTitle').textContent='删除“'+snapshot.name+'”？';$('deleteSnapshotError').hidden=true;$('deleteSnapshotDialog').showModal();});
+$('deleteSnapshot').addEventListener('click',()=>{if(!snapshot||!shared||!canEditWorkspace())return;pendingDeleteId=selectedId;$('deleteSnapshotTitle').textContent='删除“'+snapshot.name+'”？';$('deleteSnapshotError').hidden=true;$('deleteSnapshotDialog').showModal();});
 $('cancelDeleteSnapshot').addEventListener('click',()=>$('deleteSnapshotDialog').close());
 $('deleteSnapshotForm').addEventListener('submit',e=>{
-  e.preventDefault();if(!pendingDeleteId)return;
+  e.preventDefault();if(!pendingDeleteId||!shared||!canEditWorkspace())return;
   try{const index=rows.findIndex(r=>r.id===pendingDeleteId),removed=store.remove(pendingDeleteId);pendingDeleteId='';rows=store.list();$('deleteSnapshotDialog').close();
     if(!removed){showMissing();return;}
-    if(rows.length)selectSnapshot(rows[Math.min(Math.max(0,index),rows.length-1)].id);else{const url=new URL(location.href);url.searchParams.delete('snapshot');history.replaceState(null,'',url);emptySelection('还没有保存的快照','在工作台点击「保存快照」，即可留存当时的画板。');}status('快照已删除');
+    if(rows.length)selectSnapshot(rows[Math.min(Math.max(0,index),rows.length-1)].id);else{const url=new URL(location.href);url.searchParams.delete('snapshot');history.replaceState(null,'',url);emptySelection('还没有保存的快照','在工作台点击「保存快照」，即可留存当时的画板。');}status('快照删除待同步');
   }catch(error){$('deleteSnapshotError').textContent=error.message;$('deleteSnapshotError').hidden=false;}
 });
 $('deleteSnapshotDialog').addEventListener('close',()=>{pendingDeleteId='';});
@@ -117,4 +121,33 @@ document.addEventListener('keydown',e=>{if(e.target.closest('input,textarea,sele
 window.addEventListener('blur',()=>{if(drag)endPan({pointerId:drag.id},true);});
 window.addEventListener('storage',e=>{if(e.key===storageKey('topic-workbench-snapshots-v1')){try{rows=store.list();listSnapshots();if(selectedId&&!rows.some(row=>row.id===selectedId))showMissing();}catch(error){showError(error);}}});
 mountDetailResize({panel:$('historyDetail'),handle:$('historyDetailResize'),container:$('historyWorkspace'),key:storageKey('topic-workbench-history-detail-width')});
-load();
+async function bootSnapshots(){
+  await workbenchAccountReady;
+  editorSession=canEditWorkspace();
+  const localMode=new URLSearchParams(location.search).has('local');
+  try {
+    const hasLegacy=legacy.list().length>0;
+    $('localHistory').hidden=!hasLegacy || !editorSession;
+    $('localHistory').href=localMode?'snapshots.html':'snapshots.html?local=1';
+    $('localHistory').textContent=localMode?'线上快照':'本机旧快照';
+  } catch {}
+  if (editorSession && !localMode) {
+    try {
+      shared=await openSharedSnapshots({onUpdate:load,onStatus:(phase,message)=>{
+        $('historyPublishDraft').hidden=phase!=='conflict';
+        if (phase==='synced') status('');
+        else status(message);
+      }});
+      if (shared) store=shared.store;
+    } catch(error) {showError(error);return;}
+  }
+  $('deleteSnapshot').hidden=!shared;
+  $('historyPublishDraft').onclick=()=>{
+    if (shared?.sync.conflict() && window.confirm('用本机草稿更新线上快照？')) shared.sync.publishDraft();
+  };
+  window.addEventListener('workbench-account-changed',()=>{
+    if (editorSession!==canEditWorkspace()) {shared?.sync.dispose();location.reload();}
+  });
+  load();
+}
+bootSnapshots();
