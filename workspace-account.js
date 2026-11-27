@@ -1,4 +1,4 @@
-import {mountWorkspaceLogin} from './workspace-login.js?v=20261127-login-entry';
+import {mountWorkspaceLogin} from './workspace-login.js?v=20261127-restore-session';
 
 const service = 'https://topic-collaboration-shirly.shirlyjia826.chatgpt.site';
 const sessionKey = 'topic-workbench-account-v1';
@@ -61,7 +61,7 @@ export function currentWorkbenchAccount() {
 
 export function showWorkbench() {
   if (!currentWorkbenchAccount()) return false;
-  document.body.classList.remove('account-gated');
+  document.body.classList.remove('account-gated','account-opening');
   return true;
 }
 
@@ -105,9 +105,19 @@ function mountAccount(root) {
   const trigger = root.querySelector('.account-trigger'), panel = root.querySelector('.account-menu');
   const summary = panel.querySelector('.account-summary'), message = panel.querySelector('.account-message'), action = panel.querySelector('.account-action');
   const gated = document.body.classList.contains('account-gated');
-  const renderLogin = gated ? mountWorkspaceLogin(()=>runAccountAction(false)) : null;
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  let exchanging = fragment.has('account_code') && !fragment.has('account_error');
+  if (gated && (credential() || exchanging)) document.body.classList.add('account-opening');
+  const renderLogin = gated ? mountWorkspaceLogin(()=>runAccountAction(false),refresh) : null;
   let user = null, busy = '', error = '', verifiedToken = '', verifiedAt = 0, generation = 0, verifying, expiryTimer;
-  let initialized = false;
+  let initialized = false, finishReady, retryTimer, retryDelay = 1500;
+  const ready = new Promise(resolve=>{finishReady=resolve;});
+
+  function settleInitialAccount() {
+    if (initialized || (gated && !user && credential())) return;
+    initialized = true;
+    finishReady();
+  }
 
   function render() {
     const label = document.createElement('span');
@@ -130,7 +140,10 @@ function mountAccount(root) {
     action.textContent = busy || (user ? '退出登录' : '使用公司飞书登录');
     action.disabled = Boolean(busy);
     action.classList.toggle('sign-in',!user);
-    renderLogin?.({user,busy:busy || (verifying && !user ? '正在验证飞书账号…' : ''),error});
+    if (renderLogin) {
+      const restoring = !exchanging && !user && Boolean(credential());
+      renderLogin({user,busy,error,opening:exchanging||Boolean(user)||restoring,retry:restoring&&Boolean(error)});
+    }
     const token = user ? verifiedToken : '';
     if (profileToken!==token || verifiedProfile?.name!==user?.name || verifiedProfile?.avatar!==user?.avatar || verifiedProfile?.role!==user?.role) {
       const sessionChanged = profileToken!==token;
@@ -141,6 +154,7 @@ function mountAccount(root) {
       const open = !document.body.classList.contains('account-gated');
       if (gated && sessionChanged && (open || (initialized && user))) {
         document.body.classList.add('account-gated');
+        document.body.classList.toggle('account-opening',Boolean(user||credential()));
         panel.hidePopover();
         for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
         location.reload();
@@ -167,11 +181,16 @@ function mountAccount(root) {
   window.addEventListener('resize',position,{passive:true});
 
   async function refresh() {
+    if (exchanging) return;
+    clearTimeout(retryTimer);
     const current = credential();
     if (!current) {
       generation++;
       verifying = null;
-      if (user) { user = null; verifiedToken = ''; render(); }
+      user = null;
+      verifiedToken = '';
+      render();
+      settleInitialAccount();
       return;
     }
     if (verifying === current.token || (verifiedToken === current.token && Date.now()-verifiedAt < 30_000)) return;
@@ -181,16 +200,33 @@ function mountAccount(root) {
     try {
       const result = await accountRequest('session',{token:current.token});
       if (attempt !== generation || credential()?.token !== current.token) return;
+      if (result.user!==null && (!result.user?.name || !['editor','member'].includes(result.user.role))) {
+        throw Error('账号验证暂不可用，请稍后重试。');
+      }
       user = result.user;
       verifiedToken = user ? current.token : '';
       verifiedAt = Date.now();
       if (!user) localStorage.removeItem(sessionKey);
-      error = '';
+      retryDelay = 1500;
+      error = user ? '' : '登录已失效，请重新登录。';
     } catch (e) {
       if (attempt !== generation || credential()?.token !== current.token) return;
       error = e.message;
+      if (e.status === 401) {
+        localStorage.removeItem(sessionKey);
+        user = null;
+        verifiedToken = '';
+      }
     } finally {
-      if (attempt === generation) { verifying = null; render(); }
+      if (attempt === generation) {
+        verifying = null;
+        render();
+        settleInitialAccount();
+        if (gated && !user && error && credential()) {
+          retryTimer = setTimeout(refresh,retryDelay);
+          retryDelay = Math.min(retryDelay*2,15000);
+        }
+      }
     }
   }
 
@@ -263,10 +299,15 @@ function mountAccount(root) {
   }
 
   render();
-  const fragment = new URLSearchParams(location.hash.slice(1));
-  const ready=fragment.has('account_code') || fragment.has('account_error')
-    ? finishLogin(fragment.get('account_code'),fragment.get('account_error')) : refresh();
+  if (fragment.has('account_code') || fragment.has('account_error')) {
+    finishLogin(fragment.get('account_code'),fragment.get('account_error')).then(()=>{
+      exchanging = false;
+      if (!user && credential()) refresh();
+      else {render();settleInitialAccount();}
+    });
+  } else refresh();
   window.addEventListener('focus',refresh);
+  window.addEventListener('online',refresh);
   window.addEventListener('pageshow',event=>{
     if (!event.persisted) return;
     busy = '';
@@ -280,7 +321,7 @@ function mountAccount(root) {
     refresh();
   });
   document.addEventListener('visibilitychange',()=>{if (!document.hidden) refresh();});
-  return ready.finally(()=>{initialized=true;});
+  return ready;
 }
 
 const root = globalThis.document?.getElementById('workspaceAccount');

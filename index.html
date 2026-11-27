@@ -35,7 +35,7 @@
   <link rel="stylesheet" href="viewer-mode.css?v=20261127-retire-snapshots">
   <link rel="stylesheet" href="action-board.css?v=20261123-action-focus">
   <link rel="stylesheet" href="global-search.css?v=20261117-mobile">
-  <link rel="stylesheet" href="workspace-login.css?v=20261127-login-entry">
+  <link rel="stylesheet" href="workspace-login.css?v=20261127-restore-session">
 </head>
 <body class="account-gated board-reader">
   <a class="sr-only skip-link" href="#viewport">跳到画板</a>
@@ -149,6 +149,7 @@
   <script type="importmap">
     {
   "imports": {
+    "./workspace-account.js?v=20261127-login-entry": "./workspace-account.js?v=20261127-restore-session",
     "./board-publication.js": "./board-publication.js?v=20261127-draft-storage",
     "./workbench-model.js": "./workbench-model.js?v=20261112-lifecycle",
     "./color-presets.js": "./color-presets.js?v=20261105-feishu",
@@ -174,7 +175,7 @@
   }
 }
   </script>
-  <script type="module" src="workspace-account.js?v=20261127-login-entry"></script>
+  <script type="module" src="workspace-account.js?v=20261127-restore-session"></script>
   <script type="module" src="app.js?v=20261127-topic-directions"></script>
 </body>
 </html>

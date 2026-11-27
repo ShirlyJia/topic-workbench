@@ -1,4 +1,4 @@
-export function mountWorkspaceLogin(action) {
+export function mountWorkspaceLogin(action,retryConnection) {
   const screen = document.createElement('main');
   screen.id = 'workbenchLogin';
   screen.className = 'workbench-login';
@@ -33,11 +33,20 @@ export function mountWorkspaceLogin(action) {
   const label = button.querySelector('span');
   const status = screen.querySelector('.workbench-login-status');
   button.addEventListener('click',()=>action());
-  document.body.prepend(screen);
-  return ({user,busy,error})=>{
+  const opening = document.createElement('main');
+  opening.id = 'workbenchOpening';
+  opening.innerHTML = '<p role="status">正在打开工作台…</p><button type="button" hidden>重试连接</button>';
+  const openingStatus = opening.querySelector('p');
+  const retryButton = opening.querySelector('button');
+  retryButton.addEventListener('click',retryConnection);
+  document.body.prepend(screen,opening);
+  return ({user,busy,error,opening:isOpening,retry})=>{
+    document.body.classList.toggle('account-opening',isOpening&&document.body.classList.contains('account-gated'));
     button.disabled = Boolean(busy || user);
     label.textContent = busy || (user ? '正在打开工作台…' : '使用飞书登录');
     status.textContent = error;
     status.hidden = !error;
+    openingStatus.textContent = retry ? '暂时连不上工作台，正在重试。' : '正在打开工作台…';
+    retryButton.hidden = !retry;
   };
 }

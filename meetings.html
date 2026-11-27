@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="workspace-account.css?v=20261126-account">
   <link rel="stylesheet" href="rich-text.css?v=20261123-citation-plain">
   <link rel="stylesheet" href="date-styles.css?v=20261030-dates">
-  <link rel="stylesheet" href="workspace-login.css?v=20261127-login-entry">
+  <link rel="stylesheet" href="workspace-login.css?v=20261127-restore-session">
 </head>
 <body class="account-gated meeting-reader">
   <a class="skip-link" href="#meetingEditor">跳到会议内容</a>
@@ -67,6 +67,7 @@
   <div id="meetingToast" class="toast" role="status" hidden></div>
   <script type="importmap">{
   "imports": {
+    "./workspace-account.js?v=20261127-login-entry": "./workspace-account.js?v=20261127-restore-session",
     "./workbench-model.js": "./workbench-model.js?v=20261105-feishu",
     "./color-presets.js": "./color-presets.js?v=20261105-feishu",
     "./deployment-config.js": "./deployment-config.js?v=20261105-sync",
@@ -76,7 +77,7 @@
     "./rich-text.js?v=20261030-comment-interactions": "./rich-text.js?v=20261123-inline-citations"
   }
 }</script>
-  <script type="module" src="workspace-account.js?v=20261127-login-entry"></script>
+  <script type="module" src="workspace-account.js?v=20261127-restore-session"></script>
   <script type="module" src="meetings.js?v=20261127-meeting-notes"></script>
 </body>
 </html>
