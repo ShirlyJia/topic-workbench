@@ -1,4 +1,4 @@
-import {mountWorkspaceLogin} from './workspace-login.js?v=20261127-login-design';
+import {mountWorkspaceLogin} from './workspace-login.js?v=20261127-login-entry';
 
 const service = 'https://topic-collaboration-shirly.shirlyjia826.chatgpt.site';
 const sessionKey = 'topic-workbench-account-v1';
@@ -107,6 +107,7 @@ function mountAccount(root) {
   const gated = document.body.classList.contains('account-gated');
   const renderLogin = gated ? mountWorkspaceLogin(()=>runAccountAction(false)) : null;
   let user = null, busy = '', error = '', verifiedToken = '', verifiedAt = 0, generation = 0, verifying, expiryTimer;
+  let initialized = false;
 
   function render() {
     const label = document.createElement('span');
@@ -137,7 +138,8 @@ function mountAccount(root) {
       verifiedProfile = user;
       clearTimeout(expiryTimer);
       if (user) expiryTimer=setTimeout(refresh,Math.max(0,(credential()?.expiresAt||0)-Date.now()+100));
-      if (gated && sessionChanged && !document.body.classList.contains('account-gated')) {
+      const open = !document.body.classList.contains('account-gated');
+      if (gated && sessionChanged && (open || (initialized && user))) {
         document.body.classList.add('account-gated');
         panel.hidePopover();
         for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
@@ -274,10 +276,11 @@ function mountAccount(root) {
   window.addEventListener('storage',event=>{ if (event.key===sessionKey) refresh(); });
   window.addEventListener('workbench-session-invalid',()=>{
     if (credential()?.token===verifiedToken) localStorage.removeItem(sessionKey);
+    error = '登录已失效，请重新登录。';
     refresh();
   });
   document.addEventListener('visibilitychange',()=>{if (!document.hidden) refresh();});
-  return ready;
+  return ready.finally(()=>{initialized=true;});
 }
 
 const root = globalThis.document?.getElementById('workspaceAccount');

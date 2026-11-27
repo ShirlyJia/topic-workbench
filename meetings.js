@@ -184,10 +184,10 @@ export function deletedMeetingFileIds(data) {
 async function bootMeetings() {
   const [{currentWorkbenchAccount,requestWorkbenchWorkspace,showWorkbench,workbenchAccountReady},
     {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace}]=await Promise.all([
-    import('./workspace-account.js?v=20261127-login-design'),import('./workspace-sync.js?v=20261127-login-design')
+    import('./workspace-account.js?v=20261127-login-entry'),import('./workspace-sync.js?v=20261127-login-entry')
   ]);
   await workbenchAccountReady;
-  if (!showWorkbench()) return;
+  if (!currentWorkbenchAccount()) return;
   const $ = id => document.getElementById(id);
   // The storage getter itself may be denied; leave the old data untouched in that case.
   const adapter = {getItem:key => globalThis.localStorage.getItem(key), setItem:(key,value) => globalThis.localStorage.setItem(key,value)};
@@ -383,7 +383,7 @@ async function bootMeetings() {
     $('meetingEditor').hidden = true; $('emptyState').hidden = true; status('正在读取…');
     let remote, loadError='';
     try {remote=await readWorkspace('meetings');} catch (failure) {loadError=failure.message;}
-    if (revision!==loadRevision || !currentWorkbenchAccount()) return;
+    if (revision!==loadRevision || !showWorkbench()) return;
     shared?.dispose();shared=null;
     editableSession=canEditWorkspace();sessionLoaded=true;
     if (remote && editableSession) {

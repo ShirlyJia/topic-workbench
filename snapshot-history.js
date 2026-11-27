@@ -1,6 +1,6 @@
-import {localSnapshots,openSharedSnapshots} from './shared-snapshots.js?v=20261127-login-design';
-import {showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login-design';
-import {canEditWorkspace} from './workspace-sync.js?v=20261127-login-design';
+import {localSnapshots,openSharedSnapshots} from './shared-snapshots.js?v=20261127-login-entry';
+import {currentWorkbenchAccount,showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login-entry';
+import {canEditWorkspace} from './workspace-sync.js?v=20261127-login-entry';
 import {storageKey} from './deployment-config.js';
 import {snapshotCanvasModel, snapshotCardMarkup, snapshotFrameMarkup} from './snapshot-canvas.js?v=20261126-multi-assignees';
 import {renderSnapshotProjectDetails, renderSnapshotRecords} from './snapshot-preview.js?v=20261126-multi-assignees';
@@ -123,10 +123,10 @@ window.addEventListener('storage',e=>{if(canEditWorkspace()&&e.key===storageKey(
 mountDetailResize({panel:$('historyDetail'),handle:$('historyDetailResize'),container:$('historyWorkspace'),key:storageKey('topic-workbench-history-detail-width')});
 async function bootSnapshots(){
   await workbenchAccountReady;
-  if (!showWorkbench()) return;
+  if (!currentWorkbenchAccount()) return;
   editorSession=canEditWorkspace();
   if (!editorSession) {
-    emptySelection('快照由管理员查看','返回工作台可查看当前画板。');
+    if (showWorkbench()) emptySelection('快照由管理员查看','返回工作台可查看当前画板。');
     return;
   }
   const localMode=new URLSearchParams(location.search).has('local');
@@ -144,8 +144,9 @@ async function bootSnapshots(){
         else status(message);
       }});
       if (shared) store=shared.store;
-    } catch(error) {showError(error);return;}
+    } catch(error) {if (showWorkbench()) showError(error);return;}
   }
+  if (!showWorkbench()) return;
   $('deleteSnapshot').hidden=!shared;
   $('historyPublishDraft').onclick=()=>{
     if (shared?.sync.conflict() && window.confirm('用本机草稿更新线上快照？')) shared.sync.publishDraft();

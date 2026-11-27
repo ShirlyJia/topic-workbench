@@ -7,9 +7,9 @@ import {enrichProjectContent} from './project-content.js';
 import {orderedComments,moveComment,setCommentPinned,mountCommentSorting} from './comment-order.js';
 import {DETAIL_SECTION_TITLES, detailLayout, detailSectionTitle, visibleDetailSections, moveDetailSection, setDetailSectionHidden, renameDetailSection, removeCustomSection, restoreCustomSection} from './project-detail-layout.js';
 import {applyDomainTags} from './category-tags.js';
-import {openSharedSnapshots} from './shared-snapshots.js?v=20261127-login-design';
-import {currentWorkbenchAccount,showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login-design';
-import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-login-design';
+import {openSharedSnapshots} from './shared-snapshots.js?v=20261127-login-entry';
+import {currentWorkbenchAccount,showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login-entry';
+import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-login-entry';
 import {findScheduleConflicts,findContentOverlaps} from './workbench-review.js?v=20261102-workdays';
 import { enrichWorkbench, isClosedProject, sortProjectsByPriority, collectDirectionResults, syncFrameBoards } from './workbench-model.js';
 import { createWorkbenchViews, colorControl } from './workbench-views.js?v=20261102-results';
@@ -43,7 +43,7 @@ import {referenceLinesMarkup, clonePlacement, removePlacement} from './canvas-re
 import {fitCardPreviews} from './card-preview.js?v=20261030-two-line-previews';
 import {createProjectList} from './project-list.js?v=20261030-grouped-list';
 import {directionFocusModel,directionIcon} from './direction-focus.js?v=20261030-direction2';
-import {createSignedComments} from './signed-comments.js?v=20261127-login-design';
+import {createSignedComments} from './signed-comments.js?v=20261127-login-entry';
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1396,7 +1396,7 @@ function updateSharedBoard(release) {
 }
 async function boot(){
  await workbenchAccountReady;
- if (!showWorkbench()) return;
+ if (!currentWorkbenchAccount()) return;
  try {
   const syncKey = storageKey('topic-workbench-auto-sync');
   try { directoryConnection=localStorage.getItem(syncKey+':connection')||''; } catch {}
@@ -1404,7 +1404,7 @@ async function boot(){
   const dataKey=storageKey('topic-workbench-live-v1');
   const asRelease=value=>validateRelease({...value,board:value.data});
   let release=asRelease(await readWorkspace('board'));
-  if (!currentWorkbenchAccount()) return;
+  if (!showWorkbench()) return;
   useBoardEdition(release.updatedAt.slice(0,10)+'-'+release.revision.slice(0,16));
   const liveEdition=!boardPublication.edition||boardPublication.active===boardPublication.edition;
   localMaintainer=canEditWorkspace()&&liveEdition;
@@ -1478,6 +1478,9 @@ async function boot(){
   showBoardCopies($('settingsDialog').querySelector('.settings-links'),boardPublication);
   const linkedProject=new URLSearchParams(location.search).get('project');if(linkedProject&&byId[linkedProject])openDetail(linkedProject);
   $('toggleSidebar').setAttribute('aria-expanded',String(!mobile()&&!compact));
- }catch(error){$('loadCaption').textContent='载入失败：'+error.message;localSavePhase='unavailable';refreshSaveStatus();world.innerHTML='<div class="load-error"><h2>项目暂时无法载入</h2><p>'+esc(error.message)+'</p><button onclick="location.reload()">重新载入</button></div>';}
+ }catch(error){
+  if (!showWorkbench()) return;
+  $('loadCaption').textContent='载入失败：'+error.message;localSavePhase='unavailable';refreshSaveStatus();world.innerHTML='<div class="load-error"><h2>项目暂时无法载入</h2><p>'+esc(error.message)+'</p><button onclick="location.reload()">重新载入</button></div>';
+ }
 }
 boot();

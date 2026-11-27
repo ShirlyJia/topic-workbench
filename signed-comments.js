@@ -1,5 +1,5 @@
 import {richEditorMarkup,mountRichEditors,destroyRichEditors,flushRichEditors,readRichEditor,richHasContent,richHTML} from './rich-text.js';
-import {currentWorkbenchAccount,feishuAvatarSource,openWorkbenchAccount,requestWorkbenchComments} from './workspace-account.js?v=20261127-login-design';
+import {currentWorkbenchAccount,feishuAvatarSource,openWorkbenchAccount,requestWorkbenchComments} from './workspace-account.js?v=20261127-login-entry';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const date = new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
