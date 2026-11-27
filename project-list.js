@@ -34,7 +34,7 @@ export function createProjectList({root,getData,cardElement,openProject,matches,
       if(prefs.groupId&&group.id!==prefs.groupId)continue;
       const rows=group.rows.filter(row=>matches(row.project));
       if(!rows.length&&group.rows.length)continue;
-      if(!rows.length&&(prefs.priority||data.query||data.tags?.size||data.focusDirection))continue;
+      if(!rows.length&&(prefs.priority||data.query||data.tags?.size||data.focusDirection||data.topicDirection))continue;
       rows.forEach(row=>visibleIds.add(row.project.id));shownGroups++;
       const section=document.createElement('section');section.className='project-list-group';section.dataset.listSection=group.id;
       section.style.setProperty('--list-group-color',/^#[0-9a-f]{6}$/i.test(group.color)?group.color:'#8c8981');

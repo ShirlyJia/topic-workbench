@@ -1,5 +1,5 @@
 import {applyViewerMode,removeRetiredSession} from './viewer-mode.js';
-import {buildSearchIndex,matchesKeywords} from './global-search.js?v=20261126-multi-assignees';
+import {buildSearchIndex,matchesKeywords} from './global-search.js?v=20261127-topic-directions';
 import {mountGlobalSearch} from './global-search-view.js';
 import {createCanvasEditor} from './canvas-editor.js?v=20261030-detail';
 import {canvasItemBounds, translateCanvasItem, restoreYellowNotes} from './canvas-items.js?v=20261030-detail';
@@ -41,8 +41,9 @@ import {mountProjectTagPicker,projectTagTriggerMarkup,projectTagNameKey} from '.
 import {projectAssignees,assigneeListMarkup,assigneeFieldMarkup,lookupFeishuAssignees,lookupFeishuAvatars,mountAssigneePicker} from './project-assignee.js?v=20261127-recent-assignees';
 import {referenceLinesMarkup, clonePlacement, removePlacement} from './canvas-references.js?v=20261102-remove-reference';
 import {fitCardPreviews} from './card-preview.js?v=20261030-two-line-previews';
-import {createProjectList} from './project-list.js?v=20261030-grouped-list';
+import {createProjectList} from './project-list.js?v=20261127-topic-directions';
 import {directionFocusModel,directionIcon} from './direction-focus.js?v=20261030-direction2';
+import {topicDirections,topicDirectionLabel} from './topic-directions.js?v=20261127-topic-directions';
 import {createSignedComments} from './signed-comments.js?v=20261127-login-entry';
 
 const $ = id => document.getElementById(id);
@@ -159,10 +160,11 @@ function mutateFlow(pid,fn,message,options){
 }
 function toast(message) {$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,4000);}
 function mobileScope(){return state.frames.find(f=>f.id===state.scopeFrame)||null;}
+function matchesTopicDirection(project){return !state.topicDirection||project.topicDirection===state.topicDirection;}
 function matchesContent(p){const tags=[...state.tags];return matchesKeywords(projectSearchText.get(p.id)||p.name,state.query)&&(!tags.length||(state.logic==='union'?tags.some(t=>p.tagIds.includes(t)):tags.every(t=>p.tagIds.includes(t))));}
-function matchesScope(p){if(focusedDirection&&!focusedDirection.ids.has(p.id))return false;if(state.display==='list'&&projectList&&!projectList.matches(p))return false;if(state.display==='results'&&!isHistoryProject(p))return false;if(['canvas','list','boards'].includes(state.display)&&isClosedProject(p))return false;const board=state.display==='boards'&&state.quickBoards.find(b=>b.id===state.activeBoard);if(board&&!board.projectIds.includes(p.id))return false;return true;}
+function matchesScope(p){if(!matchesTopicDirection(p))return false;if(focusedDirection&&!focusedDirection.ids.has(p.id))return false;if(state.display==='list'&&projectList&&!projectList.matches(p))return false;if(state.display==='results'&&!isHistoryProject(p))return false;if(['canvas','list','boards'].includes(state.display)&&isClosedProject(p))return false;const board=state.display==='boards'&&state.quickBoards.find(b=>b.id===state.activeBoard);if(board&&!board.projectIds.includes(p.id))return false;return true;}
 function matches(p){return matchesScope(p)&&(focusedDirection?.direction.id===p.id||matchesContent(p));}
-function matchesAnyFilter(){return !!focusedDirection||state.tags.size>0||state.query.trim().length>0||(state.display==='list'&&projectList?.hasFilters());}
+function matchesAnyFilter(){return !!state.topicDirection||!!focusedDirection||state.tags.size>0||state.query.trim().length>0||(state.display==='list'&&projectList?.hasFilters());}
 function projectInstances(pid){return state.instances.filter(i=>i.pid===pid);}
 function rankedTagIds(ids){return [...ids].sort((a,b)=>(tagById[a]?.rank??Infinity)-(tagById[b]?.rank??Infinity));}
 function tagMarkup(id,removable=false){const t=tagById[id];if(!t)return '';return '<span class="card-tag" style="--tag-color:'+esc(t.color)+'">'+esc(t.name)+(removable?colorControl(t.color,'data-tag-color',id,'调整'+t.name+'颜色')+'<button data-detach-tag="'+esc(id)+'" aria-label="移除此项目的'+esc(t.name)+'标签">×</button>':'')+'</span>';}
@@ -263,6 +265,11 @@ function renderTagCounts(){
   const counts=tagProjectCounts(projects.filter(matchesScope));
   $('tags').querySelectorAll('[data-tag]').forEach(button=>{const count=counts.get(button.dataset.tag)||0;button.querySelector('.filter-tag-count').textContent=count;button.setAttribute('aria-description',count+' 个项目');});
 }
+function renderTopicDirectionFilters(){
+  $('topicDirectionFilters').querySelectorAll('[data-topic-filter]').forEach(button=>{
+    button.setAttribute('aria-pressed',String(button.dataset.topicFilter===state.topicDirection));
+  });
+}
 function renderDirectionFocus(){
   focusedDirection=directionFocusModel(state,state.focusDirection);
   if(state.focusDirection&&!focusedDirection){state.focusDirection=null;state.mode='highlight';}
@@ -270,7 +277,7 @@ function renderDirectionFocus(){
   bar.hidden=!directions.length||!['canvas','list'].includes(state.display);
   const markup='<option value="">全部项目</option>'+directions.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('');
   if(select.innerHTML!==markup)select.innerHTML=markup;
-  select.value=state.focusDirection||'';select.title=focusedDirection?.direction.name||'选择主方向，聚焦关联项目';
+  select.value=state.focusDirection||'';select.title=focusedDirection?.direction.name||'选择主项目，查看关联小项目';
   $('directionFocusCount').textContent=focusedDirection?focusedDirection.rows.length+' 个关联项目':'';
   $('exitDirectionFocus').hidden=!focusedDirection;bar.classList.toggle('is-focused',!!focusedDirection);
   document.querySelectorAll('[data-focus-direction]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.focusDirection===state.focusDirection)));
@@ -281,14 +288,47 @@ function setDirectionFocus(id){
   closeDetail();state.focusDirection=id||null;state.scopeFrame=null;state.mode=id&&state.display!=='list'?'gather':'highlight';
   state.selected.clear();state.selectedFrames.clear();canvasEditor?.clear();applyFilter();$('gatherCards').scrollTop=0;renderSelection();
 }
-function applyFilter(options={}){renderDirectionFocus();renderTagCounts();const filtered=matchesAnyFilter();world.querySelectorAll('.project-card').forEach(el=>{const yes=matches(byId[el.dataset.pid]);el.classList.toggle('dimmed',filtered&&!yes);el.classList.toggle('match',filtered&&yes);el.classList.toggle('direction-match',!!focusedDirection&&yes);el.classList.toggle('direction-root',focusedDirection?.direction.id===el.dataset.pid);});$('logic').hidden=state.tags.size<2;$('clear').hidden=!state.tags.size&&!state.query.trim()&&!(state.display==='list'&&projectList?.hasFilters())&&(state.mode!=='gather'||!!focusedDirection);const count=projects.filter(matches).length;$('canvasCount').textContent=projects.length+' 个项目 · '+state.frames.length+' 个分组'+(filtered?' · 匹配 '+count+' 项':'');$('searchEmpty').hidden=state.display!=='canvas'||!filtered||count>0||state.mode==='gather';if(!options.keepMain){renderMobile();workbench?.render();}renderGather();fitCardPreviews(world,state.frames);syncActiveProject();for(const mode of ['highlight','gather']){$(mode).classList.toggle('active',state.mode===mode);$(mode).setAttribute('aria-pressed',String(state.mode===mode));}}
+function applyFilter(options={}){
+  renderDirectionFocus();
+  renderTopicDirectionFilters();
+  renderTagCounts();
+  const filtered=matchesAnyFilter();
+  world.querySelectorAll('.project-card').forEach(el=>{
+    const matchesProject=matches(byId[el.dataset.pid]);
+    el.classList.toggle('dimmed',filtered&&!matchesProject);
+    el.classList.toggle('match',filtered&&matchesProject);
+    el.classList.toggle('direction-match',!!focusedDirection&&matchesProject);
+    el.classList.toggle('direction-root',focusedDirection?.direction.id===el.dataset.pid);
+  });
+  $('logic').hidden=state.tags.size<2;
+  const hasClearableFilters=state.topicDirection||state.tags.size||state.query.trim()||
+    (state.display==='list'&&projectList?.hasFilters());
+  $('clear').hidden=!hasClearableFilters&&(state.mode!=='gather'||!!focusedDirection);
+  const count=projects.filter(matches).length;
+  $('canvasCount').textContent=projects.length+' 个项目 · '+state.frames.length+' 个分组'+(filtered?' · 匹配 '+count+' 项':'');
+  const empty=$('searchEmpty');
+  empty.hidden=state.display!=='canvas'||!filtered||count>0||state.mode==='gather';
+  if(!empty.hidden){
+    const unusedDirection=state.topicDirection&&!projects.some(project=>project.topicDirection===state.topicDirection);
+    empty.querySelector('p').textContent=unusedDirection&&canMaintain()
+      ? '在「全部」里打开项目，可在详情中设置议题方向。'
+      : '试试其他议题方向、关键词，或清除筛选。';
+  }
+  if(!options.keepMain){renderMobile();workbench?.render();}
+  renderGather();fitCardPreviews(world,state.frames);syncActiveProject();
+  for(const mode of ['highlight','gather']){
+    $(mode).classList.toggle('active',state.mode===mode);
+    $(mode).setAttribute('aria-pressed',String(state.mode===mode));
+  }
+}
 function renderMobile(){projectList?.render();}
 function gatheredCard(project){const el=cardElement(project,null,{showCategoryTags:false});if(isClosedProject(project)&&project.result){let note=el.querySelector('.card-note');if(!note){note=document.createElement('p');note.className='card-note';el.append(note);}note.textContent=displayDescription(project.result);}el.addEventListener('click',e=>{if(!e.target.closest('select,input,button'))openDetail(project.id);});return el;}
 function renderDirectionGather(target){
   const model=focusedDirection;
-  const active=model.active.filter(r=>matchesContent(r.project)),frozen=model.frozen.filter(r=>matchesContent(r.project)),closed=model.closed.filter(r=>matchesContent(r.project));
+  const matchesRow=({project})=>matchesTopicDirection(project)&&matchesContent(project);
+  const active=model.active.filter(matchesRow),frozen=model.frozen.filter(matchesRow),closed=model.closed.filter(matchesRow);
   const narrowed=active.length+frozen.length+closed.length!==model.rows.length;
-  $('gatherTitle').innerHTML='<span class="direction-focus-heading">'+directionIcon+'主方向聚焦</span><button type="button" class="direction-focus-title" data-open="'+esc(model.direction.id)+'" aria-label="查看主方向：'+esc(model.direction.name)+'">'+esc(model.direction.name)+'<span aria-hidden="true">↗</span></button>';
+  $('gatherTitle').innerHTML='<span class="direction-focus-heading">'+directionIcon+'项目聚焦</span><button type="button" class="direction-focus-title" data-open="'+esc(model.direction.id)+'" aria-label="查看主项目：'+esc(model.direction.name)+'">'+esc(model.direction.name)+'<span aria-hidden="true">↗</span></button>';
   $('gatherSummary').textContent=(isClosedProject(model.direction)?'方向已结束 · ':'')+model.active.length+' 项推进中'+(model.frozen.length?' · '+model.frozen.length+' Frozen':'')+(model.closed.length?' · '+model.closed.length+' 项已结束':'')+(narrowed?' · 筛选显示 '+(active.length+frozen.length+closed.length)+' 项':'');
   function tree(rows){
     const list=document.createElement('div');list.className='direction-focus-tree';list.setAttribute('role','list');list.setAttribute('aria-label','方向关联项目');
@@ -307,7 +347,7 @@ function renderDirectionGather(target){
   if(!active.length&&!frozen.length)target.insertAdjacentHTML('beforeend','<div class="direction-focus-empty">'+(narrowed?'没有匹配的进行中项目':model.closed.length?'关联项目均已结束':'暂未关联小项目')+'</div>');
   if(closed.length){const history=document.createElement('details');history.className='direction-focus-history';history.innerHTML='<summary>已结束 · '+closed.length+' 项</summary>';history.append(tree(closed));target.append(history);}
 }
-function renderGather(){canvasEditor?.sync();const show=state.mode==='gather';$('gatherMask').hidden=!show;$('gatherPanel').hidden=!show;$('gatherPanel').classList.toggle('is-direction-focus',!!focusedDirection);$('scatter').textContent=focusedDirection?'回到画板 ↗':'散回原位 ↗';if(!show)return;const target=$('gatherCards'),historyOpen=target.dataset.directionId===state.focusDirection&&target.querySelector('.direction-focus-history')?.open;target.dataset.directionId=state.focusDirection||'';target.innerHTML='';if(focusedDirection){renderDirectionGather(target);if(historyOpen&&target.querySelector('.direction-focus-history'))target.querySelector('.direction-focus-history').open=true;return;}const list=sortProjectsByPriority(projects.filter(matches));$('gatherTitle').textContent=state.tags.size?[...state.tags].map(id=>tagById[id]?.name).join(state.logic==='union'?' ∪ ':' ∩ '):state.query?'搜索结果':'全部项目';$('gatherSummary').textContent=list.length+' 个项目';list.forEach((p,n)=>{const el=gatheredCard(p);el.style.animationDelay=Math.min(n*25,150)+'ms';target.append(el);});if(!list.length)target.innerHTML='<div class="gather-empty">没有满足此标签组合的项目</div>';}
+function renderGather(){canvasEditor?.sync();const show=state.mode==='gather';$('gatherMask').hidden=!show;$('gatherPanel').hidden=!show;$('gatherPanel').classList.toggle('is-direction-focus',!!focusedDirection);$('scatter').textContent=focusedDirection?'回到画板 ↗':'散回原位 ↗';if(!show)return;const target=$('gatherCards'),historyOpen=target.dataset.directionId===state.focusDirection&&target.querySelector('.direction-focus-history')?.open;target.dataset.directionId=state.focusDirection||'';target.innerHTML='';if(focusedDirection){renderDirectionGather(target);if(historyOpen&&target.querySelector('.direction-focus-history'))target.querySelector('.direction-focus-history').open=true;return;}const list=sortProjectsByPriority(projects.filter(matches));$('gatherTitle').textContent=state.tags.size?[...state.tags].map(id=>tagById[id]?.name).join(state.logic==='union'?' ∪ ':' ∩ '):state.query?'搜索结果':topicDirectionLabel(state.topicDirection)||'全部项目';$('gatherSummary').textContent=list.length+' 个项目';list.forEach((p,n)=>{const el=gatheredCard(p);el.style.animationDelay=Math.min(n*25,150)+'ms';target.append(el);});if(!list.length)target.innerHTML='<div class="gather-empty">没有匹配的项目</div>';}
 function renderSelection(){
   state.selectedFrames=new Set([...state.selectedFrames].filter(id=>state.frames.some(f=>f.id===id)));
   const members=new Set(state.frames.filter(f=>state.selectedFrames.has(f.id)).flatMap(f=>f.members));
@@ -647,6 +687,16 @@ function locateDetailProject(pid){
   }
   if(card){card.focus({preventScroll:true});card.classList.add('detail-location-target');setTimeout(()=>card.classList.remove('detail-location-target'),2400);}
 }
+function topicDirectionField(project,editable){
+  const direction=topicDirectionLabel(project.topicDirection);
+  if(!editable){
+    return direction?'<span class="topic-direction-field is-readonly"><span>议题方向</span><strong>'+esc(direction)+'</strong></span>':'';
+  }
+  const options=[['','未设置'],...topicDirections].map(([key,label])=>
+    '<option value="'+esc(key)+'"'+(key===(direction?project.topicDirection:'')?' selected':'')+'>'+esc(label)+'</option>'
+  ).join('');
+  return '<label class="topic-direction-field"><span>议题方向</span><select data-inline="topicDirection" aria-label="议题方向">'+options+'</select></label>';
+}
 function openDetail(pid,instanceId=null,resetScroll=true,{keepTrail=false}={}){
   if(canvasEditor?.clear()===false)return;
   if(!flushRichEditors($('detailBody')))return;
@@ -662,7 +712,7 @@ function openDetail(pid,instanceId=null,resetScroll=true,{keepTrail=false}={}){
   const parentHint=parentProjectHintMarkup(p.id,state);
   let html='<div class="detail-title-tools"><div class="detail-kind-row"><label class="kind-select"><select data-inline="kind" aria-label="项目类型"><option value="project"'+(p.kind!=='direction'?' selected':'')+'>项目</option><option value="direction"'+(p.kind==='direction'?' selected':'')+'>长期方向</option></select></label>'+(parentHint?'<span class="detail-child-label">子项目</span>':'')+'</div>'+navigation+'</div>';
   html+=parentHint+'<div class="project-title-editor">'+inlineText('name','项目标题',p.name,{title:true,rows:1,autogrow:true})+'<button type="button" data-edit-project-title aria-label="修改项目标题">✎ 改标题</button></div>';
-  html+='<div class="detail-edit-properties"><label><span>优先级</span>'+priorityControl(p)+'</label>'+assigneeFieldMarkup(projectAssignees(p),maintainer)+'<label class="free-status"><span>结果状态</span><input class="inline-input" data-inline="outcome" aria-label="结果状态" value="'+esc(p.outcome||'')+'" placeholder="自由填写"></label><label class="lifecycle-control"><span>项目状态</span><select data-project-lifecycle aria-label="项目状态">'+Object.entries(lifecycleLabels).map(([value,label])=>'<option value="'+value+'"'+(projectLifecycle(p)===value?' selected':'')+'>'+label+'</option>').join('')+'</select></label></div>';
+  html+='<div class="detail-edit-properties"><label><span>优先级</span>'+priorityControl(p)+'</label>'+topicDirectionField(p,maintainer)+assigneeFieldMarkup(projectAssignees(p),maintainer)+'<label class="free-status"><span>结果状态</span><input class="inline-input" data-inline="outcome" aria-label="结果状态" value="'+esc(p.outcome||'')+'" placeholder="自由填写"></label><label class="lifecycle-control"><span>项目状态</span><select data-project-lifecycle aria-label="项目状态">'+Object.entries(lifecycleLabels).map(([value,label])=>'<option value="'+value+'"'+(projectLifecycle(p)===value?' selected':'')+'>'+label+'</option>').join('')+'</select></label></div>';
   html+=flowMarkup(p)+lifecycleLog(p);
   const deliverySummary=deliveryCardMarkup(p);if(deliverySummary)html+='<div class="detail-delivery-summary">'+deliverySummary+'<button type="button" data-delivery-plan-jump>查看交付计划 ↓</button></div>';
   html+=(maintainer||p.tagIds.length)?'<div class="detail-tags">'+detailTagContents(p,maintainer)+'</div>':'';
@@ -813,8 +863,13 @@ function commitInline(el,{automatic=false}={}){
   if(ok){finishInlineCommit(el);if(key==='focus')$('detailBody').querySelectorAll('[data-inline="focus"]').forEach(box=>box.checked=!!p.planNodes.find(n=>n.id===box.dataset.nodeId)?.focus);}return ok;
 }
 function flushInline(){if(document.querySelector(composingInputs))return false;if(tagEditor?.flush()===false)return false;if(!flushRichEditors($('detailBody'))||!flushRichEditors($('workbenchView')))return false;let ok=flowEditor?.flush()!==false;if(canvasEditor?.flush()===false)ok=false;document.querySelectorAll('[data-inline][data-pending]').forEach(el=>{if(!commitInline(el))ok=false;});if(workbench?.flush()===false)ok=false;return ok;}
-function navigate(display,board=null){
-  if(!flushInline())return;closeDetail();state.activeBoard=board;state.scopeFrame=null;state.focusDirection=null;state.tags.clear();state.query='';$('search').value='';renderTags();setDisplay(display);if(mobile())toggleSidebar(false);
+function navigate(display,board=null,{keepFilters=false}={}){
+  if(!flushInline())return;
+  closeDetail();state.activeBoard=board;state.scopeFrame=null;
+  if(!keepFilters){
+    state.focusDirection=null;state.topicDirection='';state.tags.clear();state.query='';$('search').value='';
+  }
+  renderTags();setDisplay(display);if(mobile())toggleSidebar(false);
 }
 function setDisplay(display){
   if(!flushInline())return;canvasEditor?.clear();if(display==='boards'&&!state.quickBoards.some(b=>b.id===state.activeBoard))display='canvas';if(mobile()&&display==='canvas')display='list';state.display=display;
@@ -1060,7 +1115,10 @@ $('editorFields').addEventListener('click',e=>{
 document.addEventListener('click',e=>{const direction=e.target.closest('[data-focus-direction]');if(direction){if(clickSuppressed)return;const id=direction.dataset.focusDirection;if(!['canvas','list'].includes(state.display))navigate('canvas');setDirectionFocus(state.focusDirection===id?'':id);return;}const parent=e.target.closest('[data-card-parent]');if(parent){openDetail(parent.dataset.cardParent);return;}const child=e.target.closest('[data-open-children]');if(child&&!child.closest('#world')){showChildren(child.dataset.openChildren);return;}const b=e.target.closest('[data-open]');if(b&&!b.closest('#world'))openDetail(b.dataset.open);});
 window.addEventListener('beforeunload',e=>{if(!flushInline()||!flushRichEditors($('editorFields'))||dirty||(canMaintain()&&cloudSync?.pending())){e.preventDefault();e.returnValue='';}});
 $('toggleSidebar').addEventListener('click',()=>toggleSidebar());$('collapseSidebar').addEventListener('click',()=>toggleSidebar(false));$('sidebarBackdrop').addEventListener('click',()=>toggleSidebar(false));
-$('canvasView').addEventListener('click',()=>navigate('canvas'));$('listView').addEventListener('click',()=>navigate('list'));$('canvasNav').addEventListener('click',()=>navigate('canvas'));$('resultsNav').addEventListener('click',()=>navigate('results'));$('deliveryNav').addEventListener('click',()=>navigate('delivery'));
+for(const [id,display] of [['canvasView','canvas'],['listView','list']]){
+  $(id).addEventListener('click',()=>navigate(display,null,{keepFilters:['canvas','list'].includes(state.display)}));
+}
+$('canvasNav').addEventListener('click',()=>navigate('canvas'));$('resultsNav').addEventListener('click',()=>navigate('results'));$('deliveryNav').addEventListener('click',()=>navigate('delivery'));
 $('frameNav').addEventListener('change',e => {
   const frameId = e.target.value;
   e.target.value = '';
@@ -1086,9 +1144,22 @@ window.addEventListener('pageshow',event => {
 });
 
 globalSearch=mountGlobalSearch({input:$('search'),getIndex:()=>searchEntries,getStatus:()=>searchMeetingStatus,onQuery:query=>{state.query=query;applyFilter();},onOpen:openSearchResult});$('search').addEventListener('focus',refreshSearchMeetings);window.addEventListener('storage',e=>{if(e.key?.endsWith('topic-workbench-meetings-v1'))refreshSearchMeetings();});$('logic').addEventListener('change',e=>{state.logic=e.target.value;applyFilter();});
+const topicDirectionFilters=$('topicDirectionFilters');
+topicDirectionFilters.innerHTML=[['','全部'],...topicDirections].map(([key,label])=>
+  '<button type="button" data-topic-filter="'+esc(key)+'" aria-pressed="'+String(!key)+'">'+esc(label)+'</button>'
+).join('');
+topicDirectionFilters.addEventListener('click',event=>{
+  const button=event.target.closest('button[data-topic-filter]');
+  if(!state||!button||button.dataset.topicFilter===state.topicDirection||!flushInline())return;
+  state.topicDirection=button.dataset.topicFilter;
+  state.selected.clear();
+  state.selectedFrames.clear();
+  applyFilter();
+  renderSelection();
+});
 $('directionFocusIcon').innerHTML=directionIcon;$('focusDirection').addEventListener('change',e=>setDirectionFocus(e.target.value));$('exitDirectionFocus').addEventListener('click',()=>setDirectionFocus(''));
 $('highlight').addEventListener('click',()=>{state.mode='highlight';applyFilter();renderSelection();});$('gather').addEventListener('click',()=>{state.mode=state.mode==='gather'?'highlight':'gather';applyFilter();renderSelection();});$('scatter').addEventListener('click',scatter);$('gatherMask').addEventListener('click',scatter);
-$('clear').addEventListener('click',()=>{if(projectList?.clearFilters()===false)return;state.scopeFrame=null;state.tags.clear();state.query='';$('search').value='';if(!state.focusDirection)state.mode='highlight';renderTags();applyFilter();renderSelection();renderFrameNav();});
+$('clear').addEventListener('click',()=>{if(projectList?.clearFilters()===false)return;state.scopeFrame=null;state.topicDirection='';state.tags.clear();state.query='';$('search').value='';if(!state.focusDirection)state.mode='highlight';renderTags();applyFilter();renderSelection();renderFrameNav();});
 document.querySelectorAll('[data-tool]').forEach(b=>b.addEventListener('click',()=>setTool(b.dataset.tool)));$('groupTool').addEventListener('click',groupSelection);$('groupSelection').addEventListener('click',groupSelection);$('duplicateSelection').addEventListener('click',()=>duplicateInstances([...state.selected]));$('referenceSelection').addEventListener('click',()=>addReferences(state.instances.filter(i=>state.selected.has(i.id)).map(i=>i.pid)));$('clearSelection').addEventListener('click',()=>{state.selected.clear();state.selectedFrames.clear();renderSelection();});$('zoomIn').addEventListener('click',()=>zoom(1.15));$('zoomOut').addEventListener('click',()=>zoom(1/1.15));$('fit').addEventListener('click',fit);
 $('closeDetail').addEventListener('click',closeDetail);$('openSettings').addEventListener('click',()=>$('settingsDialog').showModal());$('closeSettings').addEventListener('click',()=>$('settingsDialog').close());$('help').addEventListener('click',()=>$('helpDialog').showModal());$('closeHelp').addEventListener('click',()=>$('helpDialog').close());$('cancelName').addEventListener('click',()=>$('nameDialog').close());
 $('nameForm').addEventListener('submit',e=>{e.preventDefault();const name=$('frameName').value.trim();if(!name)return;const ok=mutate(()=>{if(pendingFrame.rename)state.frames.find(f=>f.id===pendingFrame.rename).name=name;else state.frames.push({id:uid('frame'),name,...pendingFrame.bounds,members:pendingFrame.ids,tone:'sand',color:'#b8afa0',backgroundColor:'#e9e8e4'});state.selected.clear();state.selectedFrames.clear();},'分组已更新');if(ok){$('nameDialog').close();setTool('select');}});
@@ -1454,7 +1525,7 @@ async function boot(){
     boardFingerprint(enriched)!==boardFingerprint(normalizedSeed);
   if(!loaded.data.workbenchVersion&&loaded.fromStorage)localStorage.setItem(storageKey('topic-workbench-v2-before-workbench-upgrade'),JSON.stringify(loaded.data));
   const {tags,...data}=enriched;
-  state={...data,canvasItems:data.canvasItems||[],tagDefinitions:tags,selected:new Set(),selectedFrames:new Set(),tags:new Set(),logic:'intersection',mode:'highlight',query:'',tool:'select',detail:null,detailInstance:null,display:'canvas',activeBoard:null,scopeFrame:null,focusDirection:null,deliveryFilter:'active',deliveryQuery:''};
+  state={...data,canvasItems:data.canvasItems||[],tagDefinitions:tags,selected:new Set(),selectedFrames:new Set(),tags:new Set(),topicDirection:'',logic:'intersection',mode:'highlight',query:'',tool:'select',detail:null,detailInstance:null,display:'canvas',activeBoard:null,scopeFrame:null,focusDirection:null,deliveryFilter:'active',deliveryQuery:''};
   reconcileDelivery(state);
   deliveryController=createDeliveryController({getState:()=>state,mutate,flush:flushInline,editor,field,area,check,openProject:openDetail,navigate,toast,storageKey});
   indexData();canvasEditor=createCanvasEditor({world,viewport,getState:()=>state,mutate,save,toWorld,setTool,isPanning:e=>space||state.tool==='pan'||e.button===1,clearProjects:()=>{state.selected.clear();state.selectedFrames.clear();renderSelection();},closeDetail,toast,onEditing:()=>{dirty=true;refreshSaveStatus();}});workbench=createWorkbenchViews({getState:()=>state,update:mutate,openProject:openDetail,priorityControl,canMaintain,navigate,editor,field,area,matches,commitInline,notify:toast,afterRender:syncActiveProject});projectList=createProjectList({root:$('mobileList'),getData:()=>state,cardElement,openProject:openDetail,matches,beforeChange:flushInline,onFilterChange:()=>{renderTags();applyFilter();renderSelection();},key:storageKey('topic-workbench-list-view-v1'),notify:toast});bindEvents();
