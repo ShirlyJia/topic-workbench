@@ -1,6 +1,7 @@
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const assigneeNameLimit = 80;
 const refPattern = /^[a-f0-9]{32}$/;
+const recentLimit = 8;
 const nameKey = name => name.trim().normalize('NFKC').toLocaleLowerCase();
 const named = person => typeof person?.name === 'string' && person.name.trim() && person.name.length <= assigneeNameLimit;
 
@@ -64,14 +65,23 @@ export async function lookupFeishuAvatars(origin, connection, refs) {
   return avatars || {};
 }
 
-export function mountAssigneePicker({root, getProject, knownPeople, beforeOpen, lookup, lookupAvatars, assign, updateAvatars}) {
+function matchingPerson(rows, person) {
+  const exact = person.ref && rows.find(row=>row.ref===person.ref);
+  if (exact) return exact;
+  const sameName = rows.filter(row=>nameKey(row.name)===nameKey(person.name) && !(row.ref && person.ref));
+  const sameAvatar = person.avatar && sameName.find(row=>row.avatar===person.avatar);
+  if (sameAvatar) return sameAvatar;
+  return sameName.length===1 && (!person.avatar || !sameName[0].avatar) ? sameName[0] : undefined;
+}
+
+export function mountAssigneePicker({root, getProject, knownPeople, recentStorageKey, beforeOpen, lookup, lookupAvatars, assign, updateAvatars}) {
   const dialog = document.createElement('dialog');
   dialog.className = 'assignee-dialog';
   dialog.setAttribute('aria-labelledby','assignee-dialog-title');
   dialog.innerHTML = '<header><h2 id="assignee-dialog-title">负责人</h2><span class="assignee-count"></span><button type="button" data-assignee-close aria-label="取消选人">×</button></header>'+
     '<div class="assignee-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5"/><path d="m12 12 4 4"/></svg><input type="search" aria-label="搜索飞书姓名" placeholder="搜索姓名，或手动添加" autocomplete="off" spellcheck="false" maxlength="'+assigneeNameLimit+'"></div>'+
     '<div class="assignee-picked" aria-label="已选负责人" hidden></div>'+
-    '<div class="assignee-suggestions" hidden>常用负责人</div><div class="assignee-options" aria-label="可选负责人"></div>'+
+    '<div class="assignee-suggestions" hidden></div><div class="assignee-options" aria-label="可选负责人"></div>'+
     '<p class="assignee-status" role="status" hidden></p><button class="assignee-manual" data-assignee-manual type="button" hidden></button>'+
     '<footer><button type="button" data-assignee-close>取消</button><button class="assignee-done" data-assignee-done type="button">完成</button></footer>';
   document.body.append(dialog);
@@ -80,7 +90,44 @@ export function mountAssigneePicker({root, getProject, knownPeople, beforeOpen, 
   const suggestions = dialog.querySelector('.assignee-suggestions'), status = dialog.querySelector('[role="status"]');
   const manual = dialog.querySelector('[data-assignee-manual]');
   const searchCache = new Map(), avatarTasks = new Map(), loadedAvatars = new Map();
-  let projectId = null, searchTimer, request, people = [], selected = [], initial = '', composing = false, personal = [];
+  let projectId = null, searchTimer, request, people = [], selected = [], initial = [], original = new Set(), composing = false;
+  let common = null, recent = [];
+
+  function recentRecord(person) {
+    const record = {name:person.name.trim()};
+    if (refPattern.test(person.ref || '')) record.ref = person.ref;
+    if (typeof person.department==='string' && person.department.trim()) record.department = person.department.slice(0,96);
+    const avatar = withAvatar(person).avatar;
+    if (isAssigneeAvatar(avatar)) record.avatar = avatar;
+    return record;
+  }
+  function refreshRecent() {
+    if (!recentStorageKey) return;
+    try {
+      const raw = localStorage.getItem(recentStorageKey);
+      if (raw === null) return;
+      const rows = JSON.parse(raw);
+      if (Array.isArray(rows)) recent = rows.slice(0,recentLimit).filter(named).map(recentRecord);
+    } catch {}
+  }
+  function saveRecent(rows) {
+    recent = rows;
+    if (!recentStorageKey) return;
+    try { localStorage.setItem(recentStorageKey,JSON.stringify(recent)); } catch {}
+  }
+  function rememberChoices(added) {
+    refreshRecent();
+    const next = [];
+    for (const person of [...added].reverse().concat(recent)) {
+      const record = recentRecord(person);
+      if (!matchingPerson(next,record)) next.push(record);
+      if (next.length===recentLimit) break;
+    }
+    saveRecent(next);
+  }
+  function commonPeople() {
+    return common ??= knownPeople().filter(named);
+  }
 
   function setStatus(text='') {
     status.textContent = text;
@@ -128,9 +175,10 @@ export function mountAssigneePicker({root, getProject, knownPeople, beforeOpen, 
     manual.hidden = composing || !query || exists;
     manual.textContent = query ? '＋ 手动添加「'+query+'」' : '';
   }
-  function showPeople(rows, showSuggestions=false) {
+  function showPeople(rows, label='') {
     people = rows;
-    suggestions.hidden = !showSuggestions || !rows.length;
+    suggestions.textContent = label;
+    suggestions.hidden = !label || !rows.length;
     options.innerHTML = rows.map((person,index)=>'<button class="assignee-option" data-assignee-choice="'+index+
       '" type="button" aria-pressed="false">'+assigneeMarkup(withAvatar(person))+
       (person.department ? '<span class="assignee-department" title="'+esc(person.department)+'">'+esc(person.department)+'</span>' : '')+
@@ -163,23 +211,35 @@ export function mountAssigneePicker({root, getProject, knownPeople, beforeOpen, 
     }).catch(()=>{}).finally(()=>refs.forEach(ref=>avatarTasks.delete(ref)));
     refs.forEach(ref=>avatarTasks.set(ref,task));
   }
-  function showResult(result,local) {
+  function showResult(result,local,recentMatches) {
     const rows = (Array.isArray(result.people)?result.people:[]).filter(named);
+    const remaining = [...rows];
+    const first = recentMatches.map(person=>{
+      const match = matchingPerson(remaining,person);
+      if (!match) return person;
+      remaining.splice(remaining.indexOf(match),1);
+      return {...person,...match,avatar:withAvatar(match).avatar || person.avatar};
+    });
     const names = new Set(rows.map(person=>nameKey(person.name)));
-    showPeople([...rows,...local.filter(person=>!names.has(nameKey(person.name)))]);
+    showPeople([...first,...remaining,...local.filter(person=>!names.has(nameKey(person.name)))]);
     setStatus(people.length ? result.notice : '没有找到匹配的飞书同事。');
     warmAvatars(rows);
   }
   function queueSearch() {
     cancelSearch();
     const query = input.value.trim(), key = nameKey(query);
-    const local = key?personal.filter(person=>nameKey(person.name).includes(key)):personal;
-    showPeople(local,!key);
     setStatus();
-    if (composing || !key) return;
+    if (!key) {
+      showPeople(recent.length ? recent : commonPeople(),recent.length ? '最近选择' : '常用负责人');
+      return;
+    }
+    const recentMatches = recent.filter(person=>nameKey(person.name).includes(key));
+    const local = commonPeople().filter(person=>nameKey(person.name).includes(key) && !matchingPerson(recentMatches,person));
+    showPeople([...recentMatches,...local]);
+    if (composing) return;
     if ([...query].length > 50) { setStatus('可手动添加完整姓名。'); return; }
     const cached = searchCache.get(key);
-    if (cached && cached.until>Date.now()) { showResult(cached.result,local); return; }
+    if (cached && cached.until>Date.now()) { showResult(cached.result,local,recentMatches); return; }
     searchTimer = setTimeout(async () => {
       const controller = request = new AbortController();
       setStatus('正在搜索飞书同事…');
@@ -189,7 +249,7 @@ export function mountAssigneePicker({root, getProject, knownPeople, beforeOpen, 
         searchCache.delete(key);
         searchCache.set(key,{until:Date.now()+120000,result});
         while (searchCache.size>30) searchCache.delete(searchCache.keys().next().value);
-        showResult(result,local);
+        showResult(result,local,recentMatches);
       } catch (error) {
         if (dialog.open && request===controller) setStatus(error.message);
       }
@@ -212,12 +272,20 @@ export function mountAssigneePicker({root, getProject, knownPeople, beforeOpen, 
   function finishSelection() {
     if (!projectId || composing || getProject()?.id!==projectId) return;
     const id = projectId, rows = [...selected], values = storedPeople(rows);
-    if (JSON.stringify(values)!==initial && assign(id,values)===false) return;
+    if (JSON.stringify(values)!==JSON.stringify(initial)) {
+      if (assign(id,values)===false) return;
+      const added = rows.filter(person=>!original.has(person));
+      if (added.length) rememberChoices(added);
+    }
     dialog.close();
     const pending = [...new Set(rows.map(person=>avatarTasks.get(person.ref)).filter(Boolean))];
     if (pending.length) Promise.all(pending).then(()=>{
       const filled = storedPeople(rows);
       if (JSON.stringify(filled)!==JSON.stringify(values)) updateAvatars(id,values,filled);
+      const refs = new Set(rows.map(person=>person.ref).filter(Boolean));
+      refreshRecent();
+      const refreshed = recent.map(person=>refs.has(person.ref)?recentRecord(person):person);
+      if (JSON.stringify(refreshed)!==JSON.stringify(recent)) saveRecent(refreshed);
     });
   }
 
@@ -227,8 +295,10 @@ export function mountAssigneePicker({root, getProject, knownPeople, beforeOpen, 
     if (!project || beforeOpen()===false) return;
     projectId = project.id;
     selected = projectAssignees(project).slice();
-    initial = JSON.stringify(storedPeople(selected));
-    personal = knownPeople().filter(named);
+    initial = storedPeople(selected);
+    original = new Set(selected);
+    refreshRecent();
+    common = null;
     composing = false;
     input.value = '';
     queueSearch();
@@ -275,6 +345,7 @@ export function mountAssigneePicker({root, getProject, knownPeople, beforeOpen, 
     projectId = null;
     people = [];
     selected = [];
+    original.clear();
     options.replaceChildren();
     root.querySelector('[data-assignee-trigger]')?.focus({preventScroll:true});
   });

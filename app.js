@@ -39,7 +39,7 @@ import {applyProfessionalColors, colorPickerMarkup, installColorPickers} from '.
 import {moveFramesToEdge} from './frame-layers.js';
 import {orderedTags,renameTag,moveTag,tagFilterMarkup,tagProjectCounts,mountTagEditor} from './tag-editor.js?v=20261030-tag-counts';
 import {mountProjectTagPicker,projectTagTriggerMarkup,projectTagNameKey} from './project-tag-picker.js?v=20261124-tag-picker';
-import {projectAssignees,assigneeListMarkup,assigneeFieldMarkup,lookupFeishuAssignees,lookupFeishuAvatars,mountAssigneePicker} from './project-assignee.js?v=20261126-multi-assignees';
+import {projectAssignees,assigneeListMarkup,assigneeFieldMarkup,lookupFeishuAssignees,lookupFeishuAvatars,mountAssigneePicker} from './project-assignee.js?v=20261127-recent-assignees';
 import {referenceLinesMarkup, clonePlacement, removePlacement} from './canvas-references.js?v=20261102-remove-reference';
 import {fitCardPreviews} from './card-preview.js?v=20261030-two-line-previews';
 import {createProjectList} from './project-list.js?v=20261030-grouped-list';
@@ -1018,6 +1018,7 @@ if(canMaintain())mountAssigneePicker({
   root:$('detailBody'),
   getProject:()=>canMaintain()&&!$('detail').hidden?byId[state.detail]:null,
   beforeOpen:flushInline,
+  recentStorageKey:storageKey('topic-workbench-recent-assignees:'+currentWorkbenchAccount().name),
   knownPeople:()=>{
     const counts=new Map();
     for(const project of projects)for(const person of projectAssignees(project)){
