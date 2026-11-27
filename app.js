@@ -1416,6 +1416,7 @@ async function boot(){
   let release=asRelease(await readWorkspace('board'));
   if (!showWorkbench()) return;
   useBoardEdition(release.updatedAt.slice(0,10)+'-'+release.revision.slice(0,16));
+  if (canEditWorkspace()) await boardPublication.loadDrafts().catch(()=>{});
   const viewOnline=new URLSearchParams(location.search).get('view')==='online';
   viewingArchive=canEditWorkspace()&&!viewOnline&&!!boardPublication.edition&&boardPublication.active!==boardPublication.edition;
   localMaintainer=canEditWorkspace()&&!viewingArchive&&!viewOnline;
@@ -1427,7 +1428,10 @@ async function boot(){
   const seed=release.board;
   storage.validate(seed);
   const normalizedSeed=normalizeBoard(seed);
-  const loaded=localMaintainer||viewingArchive?storage.load(seed):{data:seed,fromStorage:false,error:null};
+  const archived=viewingArchive?await boardPublication.readDraft():null;
+  const loaded=archived?{data:archived,fromStorage:true,error:null}:
+    localMaintainer||viewingArchive?storage.load(seed):{data:seed,fromStorage:false,error:null};
+  if (archived) storage.validate(archived);
   if (localMaintainer) {
     cloudSync=createWorkspaceSync({kind:'board',release:{...release,data:normalizedSeed},fingerprint:boardFingerprint,
       draftKey:dataKey+':shared:'+currentWorkbenchAccount().name,
@@ -1471,7 +1475,13 @@ async function boot(){
       storage.validate(online.board);
       const draft=documentData();
       storage.validate(draft);
-      boardPublication.archiveDraft(draft);
+      const fingerprint=boardFingerprint(draft);
+      await boardPublication.archiveDraft(draft);
+      if (!canMaintain()||!needsDraftReview||cloudSync.pending()||!flushInline()) return;
+      if (fingerprint!==boardFingerprint(documentData())) {
+        toast('还有新改动保留在草稿中，请重新切换。');
+        return;
+      }
       storage.commit(online.board,{recordHistory:false});
       clearTimeout(viewSaveTimer);
       viewSaveTimer=0;
