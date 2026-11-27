@@ -1,7 +1,5 @@
 import {MEETING_CATEGORIES, meetingCategory, enrichMeetingContent} from './meeting-model.js';
 import {createMeetingFiles,MAX_MEETING_FILE_BYTES} from './meeting-files.js';
-import {currentWorkbenchAccount,requestWorkbenchWorkspace,workbenchAccountReady} from './workspace-account.js?v=20261127-permissions';
-import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-permissions';
 import {removeMeetingItem, restoreMeetingItem, restoreMeetingById} from './meeting-trash.js';
 import {deployment, storageKey} from './deployment-config.js?v=20261105-editions';
 import {richEditorMarkup, mountRichEditors, readRichEditor, setRichEditor, flushRichEditors} from './rich-text.js?v=20261030-comment-interactions';
@@ -183,7 +181,11 @@ export function deletedMeetingFileIds(data) {
   return [...new Set(materials.filter(item => item.kind === 'file').map(item => item.fileId))];
 }
 
-function bootMeetings() {
+async function bootMeetings() {
+  const [{currentWorkbenchAccount,requestWorkbenchWorkspace,workbenchAccountReady},
+    {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace}]=await Promise.all([
+    import('./workspace-account.js?v=20261127-permissions'),import('./workspace-sync.js?v=20261127-permissions')
+  ]);
   const $ = id => document.getElementById(id);
   // The storage getter itself may be denied; leave the old data untouched in that case.
   const adapter = {getItem:key => globalThis.localStorage.getItem(key), setItem:(key,value) => globalThis.localStorage.setItem(key,value)};

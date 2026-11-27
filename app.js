@@ -1,7 +1,7 @@
 import {applyViewerMode,removeRetiredSession} from './viewer-mode.js';
 import {buildSearchIndex,matchesKeywords} from './global-search.js?v=20261126-multi-assignees';
 import {mountGlobalSearch} from './global-search-view.js';
-import {createMeetingStore,loadMeetingStore} from './meetings.js?v=20261127-permissions';
+import {createMeetingStore,loadMeetingStore} from './meetings.js?v=20261127-role-meetings';
 import {createCanvasEditor} from './canvas-editor.js?v=20261030-detail';
 import {canvasItemBounds, translateCanvasItem, restoreYellowNotes} from './canvas-items.js?v=20261030-detail';
 import {enrichProjectContent} from './project-content.js';
