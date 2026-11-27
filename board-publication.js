@@ -17,6 +17,14 @@ export function publicationStore(deployment, {edition, requested, disk}) {
     edition: versioned ? edition : null,
     active: versioned ? active : null,
     key(key) { return versioned && key === boardKey ? keyFor(active) : prefix + key; },
+    archiveDraft(data) {
+      if (!versioned) throw Error('无法在本机旧稿中保留画板');
+      const id = new Date().toISOString().slice(0,10) + '-' + crypto.randomUUID().replaceAll('-','').slice(0,16);
+      const key = keyFor(id);
+      const storage = disk();
+      storage.setItem(key, JSON.stringify(data));
+      return id;
+    },
     olderCopies() {
       if (!versioned) return [];
       const ids = [];

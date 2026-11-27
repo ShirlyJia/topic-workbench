@@ -9,7 +9,7 @@ import {DETAIL_SECTION_TITLES, detailLayout, detailSectionTitle, visibleDetailSe
 import {applyDomainTags} from './category-tags.js';
 import {currentWorkbenchAccount,openWorkbenchAccount,showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login-entry';
 import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-sync-status';
-import {mountBoardSyncStatus} from './board-sync-view.js?v=20261127-sync-status';
+import {mountBoardSyncStatus} from './board-sync-view.js?v=20261127-resume-online';
 import {findScheduleConflicts,findContentOverlaps} from './workbench-review.js?v=20261102-workdays';
 import { enrichWorkbench, isClosedProject, sortProjectsByPriority, collectDirectionResults, syncFrameBoards } from './workbench-model.js';
 import { createWorkbenchViews, colorControl } from './workbench-views.js?v=20261102-results';
@@ -1460,6 +1460,28 @@ async function boot(){
   if (!viewingArchive) showPublicationTime(release);
   if (needsDraftReview) setOnlineSaveStatus('local-draft');
   else cloudSync?.start();
+  const resume=syncStatusPanel.querySelector('[data-sync-resume]');
+  resume.addEventListener('click',async()=>{
+    if (!canMaintain()||!needsDraftReview||cloudSync.pending()||resume.disabled) return;
+    resume.disabled=true;
+    try {
+      const online=asRelease(await readWorkspace('board'));
+      if (!canMaintain()||!needsDraftReview||cloudSync.pending()||!flushInline()) return;
+      if (dirty&&!save(false,{publish:false})) return;
+      storage.validate(online.board);
+      const draft=documentData();
+      storage.validate(draft);
+      boardPublication.archiveDraft(draft);
+      storage.commit(online.board,{recordHistory:false});
+      clearTimeout(viewSaveTimer);
+      viewSaveTimer=0;
+      location.reload();
+    } catch(error) {
+      toast(error.name==='QuotaExceededError'?'本机空间不足，草稿仍在原处。':'暂时无法切换到线上版：'+error.message);
+    } finally {
+      resume.disabled=false;
+    }
+  });
   refreshSearchMeetings();
   if (!viewingArchive) watchWorkspace('board',()=>release.revision,next=>{
     if (cloudSync && (needsDraftReview||dirty||document.querySelector(pendingInputs)||!cloudSync.acceptRemote({...next,data:normalizeBoard(next.data)}))) return;
