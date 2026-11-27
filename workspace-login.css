@@ -2,178 +2,162 @@
 body.account-gated { overflow: auto; }
 body.account-gated > :not(#workbenchLogin) { display: none !important; }
 body.account-gated > #workbenchLogin {
-  --login-paper: #fbfaf7;
-  --login-ink: #282e2b;
-  --login-muted: #56615b;
+  --login-ink: #262b31;
+  --login-muted: #61646c;
+  --login-rule: #e7e8e7;
   display: grid;
-  grid-template-columns: minmax(410px, .93fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.16fr) minmax(360px, 1fr);
   min-height: 100dvh;
-  background: var(--login-paper);
   color: var(--login-ink);
+  background: #fff;
   font: 15px/1.65 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 .workbench-login-intro {
-  position: relative;
   display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 38px;
   align-items: center;
-  justify-items: center;
-  padding: 112px clamp(40px, 6vw, 100px) 84px;
+  padding: 48px clamp(36px, 5vw, 80px);
+  border-right: 1px solid var(--login-rule);
+  background: #f6f7f7;
 }
 .workbench-login-brand {
-  position: absolute;
-  top: clamp(28px, 5.5vh, 56px);
-  left: clamp(28px, 4.5vw, 72px);
   display: flex;
-  gap: 10px;
+  gap: 9px;
   align-items: center;
   font-size: 14px;
-  font-weight: 620;
+  font-weight: 640;
 }
 .workbench-login-mark {
   display: grid;
   grid-template: 1fr 1fr / 1fr 1fr;
   gap: 2px;
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
-  padding: 7px;
-  border-radius: 7px;
-  background: #263d36;
+  width: 27px;
+  height: 27px;
+  padding: 6px;
+  border: 1px solid #cbd3e0;
+  border-radius: 5px;
+  background: #edf0f5;
 }
-.workbench-login-mark i { border-radius: 1px; background: #e0e9dc; }
+.workbench-login-mark i { border-radius: 1px; background: #4d6588; }
 .workbench-login-mark i:first-child { grid-row: span 2; }
-.workbench-login-mark i:last-child { background: #a7c5b8; }
-.workbench-login-content { width: min(100%, 440px); }
-.workbench-login-content h1 {
+.workbench-login-mark i:last-child { opacity: .48; }
+.workbench-login-identity { padding: 12px 0; }
+.workbench-login-identity h1 {
   margin: 0;
-  font-size: clamp(38px, 4vw, 68px);
-  font-weight: 680;
-  line-height: 1.18;
-  letter-spacing: -.048em;
+  font-size: clamp(40px, 3.9vw, 65px);
+  font-weight: 670;
+  line-height: 1.19;
+  letter-spacing: -.037em;
+}
+.workbench-login-identity p {
+  margin: 19px 0 0;
+  color: var(--login-muted);
+}
+.workbench-login-diagram {
+  display: grid;
+  grid-template: repeat(6, 16px) / repeat(12, 16px);
+  justify-self: end;
+  margin: 0 10px 5px 0;
+}
+.workbench-login-diagram i {
+  position: relative;
+  display: block;
+  border: 1px solid #cbd3df;
+  border-radius: 3px;
+}
+.workbench-login-diagram i:nth-child(1) {
+  grid-area: 3 / 1 / 7 / 8;
+}
+.workbench-login-diagram i:nth-child(2) {
+  grid-area: 1 / 6 / 5 / 13;
+  border-color: #c1ccdb;
+  background: #edf1f57d;
+}
+.workbench-login-diagram i:nth-child(3) {
+  align-self: center;
+  grid-area: 2 / 3 / 6 / 11;
+  height: 1px;
+  border: 0;
+  border-top: 1px solid #8f9db1;
+}
+.workbench-login-diagram i:nth-child(3)::before,
+.workbench-login-diagram i:nth-child(3)::after {
+  position: absolute;
+  top: -4px;
+  width: 5px;
+  height: 5px;
+  border: 1px solid #8191a8;
+  border-radius: 50%;
+  background: #f6f7f7;
+  content: "";
+}
+.workbench-login-diagram i:nth-child(3)::before { left: 0; }
+.workbench-login-diagram i:nth-child(3)::after { right: 0; background: #8a9bb3; }
+.workbench-login-access {
+  display: grid;
+  place-items: center;
+  padding: 56px clamp(32px, 4.5vw, 72px);
+}
+.workbench-login-content { width: min(100%, 336px); }
+.workbench-login-content h2 {
+  margin: 0;
+  font-size: 25px;
+  font-weight: 660;
+  line-height: 1.3;
+  letter-spacing: -.02em;
 }
 .workbench-login-subtitle {
-  max-width: 31em;
-  margin: 22px 0 34px;
+  margin: 8px 0 26px;
   color: var(--login-muted);
-  font-size: 15px;
-  line-height: 1.8;
+  font-size: 14px;
 }
 .workbench-login-button {
-  display: inline-flex;
-  min-width: 235px;
-  min-height: 50px;
+  display: flex;
+  width: 100%;
+  min-height: 46px;
   align-items: center;
-  justify-content: center;
-  gap: 11px;
-  padding: 11px 22px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: #263d36;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 6px;
+  background: #304363;
   color: #fff;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 620;
-  transition: background .15s ease, border-color .15s ease;
+  transition: background .15s ease;
 }
-.workbench-login-button:hover:enabled { background: #395449; }
-.workbench-login-button:focus-visible { outline: 2px solid #33755d; outline-offset: 4px; }
-.workbench-login-button:disabled { opacity: 1; background: #526760; }
+.workbench-login-button:hover:enabled { background: #3c5478; }
+.workbench-login-button:active:enabled { transform: translateY(1px); }
+.workbench-login-button:focus-visible { outline: 2px solid #5278b4; outline-offset: 4px; }
+.workbench-login-button:disabled { opacity: 1; background: #56657c; }
+.workbench-login-arrow { font-weight: 450; font-size: 17px; line-height: 1; }
 .workbench-login-status {
-  max-width: 26em;
-  margin: 14px 0 0;
-  color: #8d3629;
+  margin: 12px 0 0;
+  color: #943e35;
   font-size: 13px;
   overflow-wrap: anywhere;
 }
-.workbench-login-preview {
-  display: grid;
-  place-items: center;
-  align-self: stretch;
-  margin: clamp(12px, 1.4vw, 25px);
-  padding: clamp(26px, 4vw, 64px);
-  min-width: 0;
-  border: 1px solid #dce5db;
-  border-radius: 12px;
-  background: #edf1ea;
-}
-.login-preview-grid {
-  display: grid;
-  place-items: center;
-  width: min(100%, 580px);
-  padding: clamp(14px, 2vw, 28px);
-  border: 1px solid #dce5db;
-  border-radius: 12px;
-}
-.login-preview-frame {
-  width: 100%;
-  overflow: hidden;
-  border: 1px solid #dae2d8;
-  border-radius: 10px;
-  background: #fcfdfb;
-  box-shadow: 0 9px 28px #24352c0b;
-}
-.login-preview-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px clamp(12px, 2vw, 25px);
-  border-bottom: 1px solid #e3e8e1;
-  font-size: 13px;
-  font-weight: 630;
-}
-.login-preview-bar .workbench-login-mark { width: 21px; height: 21px; padding: 5px; border-radius: 5px; }
-.login-preview-board {
-  display: grid;
-  grid-template-columns: repeat(2,minmax(0,1fr));
-  gap: clamp(9px, 1vw, 14px);
-  padding: clamp(12px, 2vw, 25px);
-}
-.login-preview-column {
-  display: grid;
-  align-content: start;
-  gap: 9px;
-  padding: clamp(8px, 1vw, 13px);
-  border: 1px solid #e8e3d9;
-  border-radius: 8px;
-  background: #f7f5ef;
-}
-.login-preview-progress { border-color: #dae3e7; background: #f2f6f7; }
-.login-preview-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 0 3px;
-  color: #59645e;
-  font-size: 11px;
-  font-weight: 620;
-}
-.login-preview-label i { width: 6px; height: 6px; border-radius: 50%; background: #98845d; }
-.login-preview-progress .login-preview-label i { background: #6e8b9b; }
-.login-preview-card {
-  min-width: 0;
-  padding: 12px 10px;
-  border: 1px solid #e3e7e1;
-  border-radius: 6px;
-  background: #fff;
-}
-.login-preview-card > span, .login-preview-card > b { display: block; }
-.login-preview-card > span { color: #626d67; font-size: 10px; }
-.login-preview-card > b { margin-top: 3px; font-size: 12px; font-weight: 660; }
-.login-preview-line { display: block; width: 88%; height: 4px; margin-top: 10px; border-radius: 2px; background: #e7ede7; }
-.login-preview-line.short { width: 59%; margin-top: 5px; }
-@media (max-width: 900px) {
-  body.account-gated > #workbenchLogin { grid-template-columns: minmax(0, 1fr); align-content: start; }
-  .workbench-login-intro { padding: 106px 26px 26px; }
-  .workbench-login-brand { left: 26px; }
-  .workbench-login-content { width: min(100%, 480px); }
-  .workbench-login-content h1 { font-size: clamp(36px, 7.1vw, 54px); }
-  .workbench-login-subtitle { margin: 15px 0 22px; }
-  .workbench-login-preview { width: min(calc(100% - 48px), 534px); margin: 12px auto 24px; padding: 15px; }
-}
-@media (max-width: 430px) {
-  .workbench-login-intro { padding-top: 89px; }
-  .workbench-login-button { width: 100%; }
-  .login-preview-grid { padding: 0; border: 0; }
-  .login-preview-card-small { display: none; }
+@media (max-width: 760px) {
+  body.account-gated > #workbenchLogin {
+    grid-template-columns: minmax(0,1fr);
+    grid-template-rows: auto 1fr;
+  }
+  .workbench-login-intro {
+    grid-template-rows: auto auto;
+    gap: 43px;
+    padding: 31px 28px 36px;
+    border-right: 0;
+    border-bottom: 1px solid var(--login-rule);
+  }
+  .workbench-login-identity { padding: 0; }
+  .workbench-login-identity h1 { font-size: clamp(34px, 7vw, 48px); }
+  .workbench-login-identity p { margin-top: 13px; }
+  .workbench-login-diagram { display: none; }
+  .workbench-login-access { align-items: start; justify-items: stretch; padding: 38px 28px 52px; }
+  .workbench-login-content { width: 100%; max-width: 420px; }
+  .workbench-login-content h2 { font-size: 22px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .workbench-login-button { transition: none; }

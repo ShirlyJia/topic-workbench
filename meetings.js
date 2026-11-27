@@ -184,7 +184,7 @@ export function deletedMeetingFileIds(data) {
 async function bootMeetings() {
   const [{currentWorkbenchAccount,requestWorkbenchWorkspace,showWorkbench,workbenchAccountReady},
     {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace}]=await Promise.all([
-    import('./workspace-account.js?v=20261127-login'),import('./workspace-sync.js?v=20261127-login')
+    import('./workspace-account.js?v=20261127-login-design'),import('./workspace-sync.js?v=20261127-login-design')
   ]);
   await workbenchAccountReady;
   if (!showWorkbench()) return;

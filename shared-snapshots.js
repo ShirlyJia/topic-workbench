@@ -1,7 +1,7 @@
 import {createSnapshotStore} from './snapshot-store.js';
 import {storageKey} from './deployment-config.js';
-import {currentWorkbenchAccount} from './workspace-account.js?v=20261127-login';
-import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-login';
+import {currentWorkbenchAccount} from './workspace-account.js?v=20261127-login-design';
+import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-login-design';
 
 const key=storageKey('topic-workbench-snapshots-v1');
 export const localSnapshots=()=>createSnapshotStore({key});

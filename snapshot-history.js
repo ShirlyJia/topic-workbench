@@ -1,6 +1,6 @@
-import {localSnapshots,openSharedSnapshots} from './shared-snapshots.js?v=20261127-login';
-import {showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login';
-import {canEditWorkspace} from './workspace-sync.js?v=20261127-login';
+import {localSnapshots,openSharedSnapshots} from './shared-snapshots.js?v=20261127-login-design';
+import {showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login-design';
+import {canEditWorkspace} from './workspace-sync.js?v=20261127-login-design';
 import {storageKey} from './deployment-config.js';
 import {snapshotCanvasModel, snapshotCardMarkup, snapshotFrameMarkup} from './snapshot-canvas.js?v=20261126-multi-assignees';
 import {renderSnapshotProjectDetails, renderSnapshotRecords} from './snapshot-preview.js?v=20261126-multi-assignees';

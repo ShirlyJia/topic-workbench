@@ -1,4 +1,4 @@
-import {mountWorkspaceLogin} from './workspace-login.js?v=20261127-login';
+import {mountWorkspaceLogin} from './workspace-login.js?v=20261127-login-design';
 
 const service = 'https://topic-collaboration-shirly.shirlyjia826.chatgpt.site';
 const sessionKey = 'topic-workbench-account-v1';
