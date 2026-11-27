@@ -36,19 +36,31 @@ export function publicationStore(deployment, {edition, requested, disk}) {
   };
 }
 
-export function showBoardCopies(container, publication) {
+export function showBoardCopies(container, publication, viewingArchive = publication.active!==publication.edition) {
   if (!publication.edition) return;
-  const previous = publication.active !== publication.edition;
-  const ids = publication.olderCopies().filter(id => id !== publication.active);
-  if (previous) ids.unshift(publication.edition);
-  for (const id of ids) {
+  function copyLink(id,text) {
     const url = new URL(location.href);
+    url.searchParams.delete('view');
     if (id === publication.edition) url.searchParams.delete('draft');
     else url.searchParams.set('draft', id);
     const link = document.createElement('a');
     link.href = url.href;
-    link.textContent = id === publication.edition ? '返回最新发布版' : id === 'legacy' ? '打开更新前的本机画板' : '打开本机旧稿 · ' + id.slice(0,10);
-    container.append(link);
+    link.textContent = text;
+    return link;
   }
-  if (previous) document.getElementById('openSettings').textContent = '⚙ 设置 · 本机旧稿';
+  if (viewingArchive) container.append(copyLink(publication.edition,'返回线上画板'));
+  const ids=publication.olderCopies().filter(id=>!viewingArchive||id!==publication.active);
+  if (!ids.length) return;
+  const details=document.createElement('details'),summary=document.createElement('summary');
+  details.className='local-board-copies';
+  summary.textContent='本机旧稿 · '+ids.length+' 份';
+  details.append(summary);
+  const dateCounts=new Map();
+  for (const id of ids) {
+    const date=id.slice(0,10),order=(dateCounts.get(date)||0)+1;
+    dateCounts.set(date,order);
+    const label=id==='legacy'?'早期本机画板':date+(order===1?'':' · 版本 '+order);
+    details.append(copyLink(id,'打开 '+label));
+  }
+  container.append(details);
 }

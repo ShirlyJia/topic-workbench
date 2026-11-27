@@ -7,8 +7,9 @@ import {enrichProjectContent} from './project-content.js';
 import {orderedComments,moveComment,setCommentPinned,mountCommentSorting} from './comment-order.js';
 import {DETAIL_SECTION_TITLES, detailLayout, detailSectionTitle, visibleDetailSections, moveDetailSection, setDetailSectionHidden, renameDetailSection, removeCustomSection, restoreCustomSection} from './project-detail-layout.js';
 import {applyDomainTags} from './category-tags.js';
-import {currentWorkbenchAccount,showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login-entry';
-import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-login-entry';
+import {currentWorkbenchAccount,openWorkbenchAccount,showWorkbench,workbenchAccountReady} from './workspace-account.js?v=20261127-login-entry';
+import {canEditWorkspace,createWorkspaceSync,readWorkspace,watchWorkspace} from './workspace-sync.js?v=20261127-sync-status';
+import {mountBoardSyncStatus} from './board-sync-view.js?v=20261127-sync-status';
 import {findScheduleConflicts,findContentOverlaps} from './workbench-review.js?v=20261102-workdays';
 import { enrichWorkbench, isClosedProject, sortProjectsByPriority, collectDirectionResults, syncFrameBoards } from './workbench-model.js';
 import { createWorkbenchViews, colorControl } from './workbench-views.js?v=20261102-results';
@@ -63,14 +64,16 @@ let focusedDirection = null;
 let state, projects = [], byId = {}, tagById = {}, lastEditor, editorInstance, gesture = null, space = false, toastTimer, pendingFrame, clickSuppressed = false, lastFrameClick, dirty = false;
 const viewport = $('viewport'), world = $('world');
 const navigationArea = $('canvasNavigation');
+const boardSyncStatus=mountBoardSyncStatus($('saveStatus'));
+const syncStatusPanel=boardSyncStatus.panel;
 let recoveryCheck = 0, viewPaintFrame = 0, viewSaveTimer = 0, paintedScale;
 let localSavePhase='loading', onlineSaveStatus=null;
 const saveStatusLabels={
-  loading:'载入中',saved:'已保存',saving:'自动保存中',synced:'已同步',syncing:'同步中',background:'已交给后台',
-  waiting:'待同步',conflict:'同步冲突',attention:'同步待处理',failed:'保存失败',
-  incomplete:'待补齐',reader:'可留言',recovery:'需要恢复',unavailable:'未载入'
+  loading:'载入中',saved:'本机已保存',saving:'自动保存中',failed:'保存失败',
+  incomplete:'待补齐',reader:'可留言',draft:'本机旧稿',recovery:'需要恢复',unavailable:'未载入'
 };
 let cloudSync = null, directoryConnection = '';
+let viewingArchive=false,needsDraftReview=false;
 let localMaintainer = false, globalSearch = null, searchMeetings = [], searchEntries = [], searchMeetingStatus = '正在读取会议记录…', projectSearchText = new Map();
 const canMaintain = () => localMaintainer && canEditWorkspace();
 function refreshSearchIndex(){searchEntries=buildSearchIndex(state,searchMeetings);projectSearchText=new Map(searchEntries.filter(r=>r.type==='project').map(r=>[r.id,r.text]));}
@@ -96,14 +99,8 @@ function refreshSaveStatus(){
     else if(dirty||document.querySelector(pendingInputs))local='saving';
   }
   const sync=local==='saved'?onlineSaveStatus:null;
-  const phase=sync?.phase||local;
-  const button=$('saveStatus'), label=$('saveStatusLabel')||button, detail=$('detailSaveStatus');
-  button.dataset.savePhase=phase;
-  const text=saveStatusLabels[phase];
-  if(label.textContent!==text)label.textContent=text;
-  button.title=sync?'已保存到本机。'+sync.message+'。点击查看同步与备份'
-    : ({saved:'已自动保存到本机。点击查看同步与备份',saving:'停笔后自动保存',failed:'点击重试本机保存',
-        incomplete:'补齐必填内容后自动保存',reader:'当前查看已发布画板'})[local]||text;
+  boardSyncStatus.render(local,sync,Boolean(state));
+  const detail=$('detailSaveStatus');
   const detailText=saveStatusLabels[local];
   if(detail.textContent!==detailText)detail.textContent=detailText;
   detail.classList.toggle('unsaved',local==='failed'||local==='incomplete');
@@ -113,25 +110,25 @@ function setSaveStatus(ok) {
   localSavePhase=ok?'saved':'failed';
   refreshSaveStatus();
 }
-function setOnlineSaveStatus(phase,message){
-  onlineSaveStatus={phase,message};
+function setOnlineSaveStatus(phase,message,status){
+  onlineSaveStatus={phase,message,status};
   refreshSaveStatus();
 }
 function save(history = true, {publish=true}={}) {
-  if(!canMaintain()){localSavePhase='reader';refreshSaveStatus();return true;}
+  if(!canMaintain()){localSavePhase=viewingArchive?'draft':'reader';refreshSaveStatus();return true;}
   clearTimeout(viewSaveTimer);
   viewSaveTimer = 0;
   try {
     const synced=syncFrameBoards(state),recordHistory=history||dirty;
     storage.commit(documentData(),{recordHistory});
-    if (publish) cloudSync?.change(documentData());
+    if (publish&&!needsDraftReview) cloudSync?.change(documentData());
     if(recordHistory)$('toast').querySelector('[data-undo-latest]')?.remove();
     if(synced)workbench?.renderNav();
     setSaveStatus(true);$('undo').disabled=!storage.canUndo();
     return true;
   } catch(e) {
     setSaveStatus(false);
-    toast(e.name==='QuotaExceededError'?'浏览器存储空间不足，修改尚未保存。请先导出备份，再减少图片或清理旧快照后重试。':'保存失败：'+e.message+'。请重试或导出备份。');
+    toast(e.name==='QuotaExceededError'?'浏览器空间不足，改动尚未保存。请先下载备份，再减少内嵌图片后重试。':'保存失败：'+e.message+'。请重试或导出备份。');
     return false;
   }
 }
@@ -1110,12 +1107,30 @@ document.querySelectorAll('[data-close-editor]').forEach(b=>b.addEventListener('
 $('editorFields').addEventListener('click',e=>{const b=e.target.closest('[data-editor-remove]');if(!b)return;const {pid,nodeId,materialId,relationId,placementId}=editorInstance;if(b.dataset.editorRemove==='node'){deliveryController.removeNode(pid,nodeId);return;}if(b.dataset.editorRemove==='placement'){if(removeCanvasReference(placementId))$('editorDialog').close();return;}const ok=mutate(()=>{if(b.dataset.editorRemove==='material')byId[pid].materials=byId[pid].materials.filter(m=>m.id!==materialId);if(b.dataset.editorRemove==='relation')state.relations=state.relations.filter(r=>r.id!==relationId);},'已移除，可撤销');if(ok)$('editorDialog').close();});
 $('detailBody').addEventListener('click',e=>{const related=e.target.closest('[data-related]');if(related){openRelatedProject(related.dataset.related);return;}const jump=e.target.closest('[data-detail-jump]');if(jump){jumpDetailSection(jump.dataset.detailJump);return;}if(e.target.closest('[data-locate-detail-project]')){locateDetailProject(state.detail);return;}const tag=e.target.closest('[data-detach-tag]');if(tag){if(editProjectTags(state.detail,{id:tag.dataset.detachTag,selected:false}))$('detailBody').querySelector('[data-project-tag-trigger]')?.focus({preventScroll:true});return;}const frame=e.target.closest('[data-focus-frame]');if(frame){closeDetail();setDisplay('canvas');focusFrame(frame.dataset.focusFrame);return;}const preview=e.target.closest('[data-preview]');if(preview){previewMaterial(state.detail,preview.dataset.preview);return;}const b=e.target.closest('[data-action]');if(!b||!canMaintain())return;b.closest('.detail-menu')?.removeAttribute('open');const pid=state.detail,id=b.dataset.id;switch(b.dataset.action){case 'project-edit':projectEditor(pid);break;case 'project-delete':deleteProject(pid);break;case 'tags':openTags();break;case 'node-add':nodeEditor(pid);break;case 'node-edit':nodeEditor(pid,id);break;case 'material-add':materialEditor(pid);break;case 'material-edit':materialEditor(pid,id);break;case 'children-show':showChildren(pid);break;case 'child-create':childProjectEditor(pid);break;case 'relation-add-main':relationEditor(pid,'main');break;case 'relation-add-child':relationEditor(pid,'child');break;case 'relation-edit':relationEditor(pid,'main',id);break;case 'reference':referenceEditor([pid]);break;case 'placement':placementEditor(id);break;}});
 $('closePreview').addEventListener('click',()=>$('previewDialog').close());$('previewDialog').addEventListener('close',()=>$('previewFrame').removeAttribute('src'));
-$('saveStatus').addEventListener('click',()=>{
-  if(state&&(dirty||document.querySelector(pendingInputs))){
-    if(flushInline()&&dirty)save(false);
-  }else $('settingsDialog').showModal();
+syncStatusPanel.querySelector('[data-sync-retry]').addEventListener('click',event=>{
+  if (event.currentTarget.dataset.syncRetry==='保存') {
+    if (state&&flushInline()&&dirty) save(false);
+  } else cloudSync?.retry();
+});
+syncStatusPanel.querySelector('[data-sync-account]').addEventListener('click',()=>{
+  syncStatusPanel.hidePopover();
+  openWorkbenchAccount();
+});
+syncStatusPanel.querySelector('[data-sync-publish]').addEventListener('click',()=>{
+  if (!canMaintain()||!cloudSync||(!needsDraftReview&&!cloudSync.conflict())||!flushInline()||(dirty&&!save(false))) return;
+  if (!window.confirm('发布本机草稿会替换当前线上画板。确定继续？')) return;
+  if (needsDraftReview) {
+    needsDraftReview=false;
+    cloudSync.change(documentData());
+    if (!cloudSync.pending()) cloudSync.start();
+  } else cloudSync.publishDraft();
 });
 $('exportData').addEventListener('click',()=>{try{if(!flushRichEditors($('detailBody')))return;if(!flushInline())return;if(reconcileDelivery(state))save(false);storage.download(documentData());toast(dirty?'已导出备份，包含当前未保存修改':'备份已导出');}catch(e){toast('导出失败：'+e.message);}});
+syncStatusPanel.querySelector('[data-sync-backup]').addEventListener('click',()=>{try{
+  if (!state) return;
+  storage.download(localSavePhase==='failed'||viewingArchive?documentData():cloudSync?.pendingData()||documentData());
+  toast('备份已下载');
+}catch(error){toast('下载备份失败：'+error.message);}});
 $('undo').addEventListener('click',undoWithDeliveryHistory);
 world.addEventListener('click',e=>{
   if(clickSuppressed||e.target.closest('input,select,textarea,label,.card-parent-marker,[data-focus-direction]'))return;
@@ -1401,48 +1416,38 @@ async function boot(){
   let release=asRelease(await readWorkspace('board'));
   if (!showWorkbench()) return;
   useBoardEdition(release.updatedAt.slice(0,10)+'-'+release.revision.slice(0,16));
-  const liveEdition=!boardPublication.edition||boardPublication.active===boardPublication.edition;
-  localMaintainer=canEditWorkspace()&&liveEdition;
+  const viewOnline=new URLSearchParams(location.search).get('view')==='online';
+  viewingArchive=canEditWorkspace()&&!viewOnline&&!!boardPublication.edition&&boardPublication.active!==boardPublication.edition;
+  localMaintainer=canEditWorkspace()&&!viewingArchive&&!viewOnline;
   document.body.classList.toggle('board-reader',!canMaintain());
   if (localMaintainer) await prepareLiveStorage({storage:localStorage,key:dataKey,
     archivePrefix:(deployment.public?deployment.namespace+':':'')+'topic-workbench-v2',release});
-  storage=createPersistence({key:dataKey,onStatus:result=>{if(result?.ok===false)setSaveStatus(false);}});
+  const boardKey=viewingArchive?storageKey('topic-workbench-v2'):dataKey;
+  storage=createPersistence({key:boardKey,onStatus:result=>{if(result?.ok===false)setSaveStatus(false);}});
   const seed=release.board;
   storage.validate(seed);
-  const loaded=localMaintainer?storage.load(seed):{data:seed,fromStorage:false,error:null};
+  const normalizedSeed=normalizeBoard(seed);
+  const loaded=localMaintainer||viewingArchive?storage.load(seed):{data:seed,fromStorage:false,error:null};
   if (localMaintainer) {
-    const settings=$('settingsDialog').querySelector('.settings-links');
-    const message=document.createElement('p'),publish=document.createElement('button');
-    const retry=document.createElement('button');
-    retry.textContent='重试同步';retry.hidden=true;
-    publish.textContent='发布本机版本';publish.hidden=true;
-    settings.prepend(message,retry,publish);
-    cloudSync=createWorkspaceSync({kind:'board',release:{...release,data:normalizeBoard(seed)},fingerprint:boardFingerprint,
+    cloudSync=createWorkspaceSync({kind:'board',release:{...release,data:normalizedSeed},fingerprint:boardFingerprint,
       draftKey:dataKey+':shared:'+currentWorkbenchAccount().name,
-      onStatus:(phase,info)=>{
-        setOnlineSaveStatus(phase,info);
-        message.textContent=info;
-        retry.hidden=!['attention','waiting'].includes(phase);
-        publish.hidden=phase!=='conflict';
-      },
+      onStatus:setOnlineSaveStatus,
       onSaved:value=>{
         release=asRelease(value);
         rememberLiveBaseline(localStorage,dataKey,release).catch(()=>{});
         showPublicationTime(release);
       }});
-    retry.onclick=()=>cloudSync.retry();
-    publish.onclick=()=>{
-      if (window.confirm('用这份本机草稿更新线上画板？')) cloudSync.publishDraft();
-    };
     if (cloudSync.pendingData()) {
       storage.validate(cloudSync.pendingData());
       loaded.data=cloudSync.pendingData();
     }
   }
-  if(loaded.error){$('loadCaption').textContent='本地记录读取失败，原记录已保留';localSavePhase='recovery';refreshSaveStatus();$('world').innerHTML='<div class="load-error"><h2>本地记录暂时无法读取</h2><p>'+esc(loaded.error)+'</p><p>原记录已保留。先导出原始备份，再处理恢复。</p><button id="downloadRaw">导出原始记录</button></div>';$('downloadRaw').onclick=()=>storage.download(localStorage.getItem(dataKey));return;}
+  if(loaded.error){$('loadCaption').textContent='本地记录读取失败，原记录已保留';localSavePhase='recovery';refreshSaveStatus();$('world').innerHTML='<div class="load-error"><h2>本地记录暂时无法读取</h2><p>'+esc(loaded.error)+'</p><p>原记录已保留。先导出原始备份，再处理恢复。</p><button id="downloadRaw">导出原始记录</button></div>';$('downloadRaw').onclick=()=>storage.download(localStorage.getItem(boardKey));return;}
   if(!loaded.data.domainTagVersion&&loaded.fromStorage)localStorage.setItem(storageKey('topic-workbench-v2-before-domain-tags'),JSON.stringify(loaded.data));
   if(!loaded.data.projectContentVersion&&loaded.fromStorage)localStorage.setItem(storageKey('topic-workbench-v2-before-project-content'),JSON.stringify(loaded.data));
-  const enriched=normalizeBoard(loaded.data);
+  const enriched=loaded.data===seed?normalizedSeed:normalizeBoard(loaded.data);
+  needsDraftReview=localMaintainer&&loaded.fromStorage&&!cloudSync.pending()&&
+    boardFingerprint(enriched)!==boardFingerprint(normalizedSeed);
   if(!loaded.data.workbenchVersion&&loaded.fromStorage)localStorage.setItem(storageKey('topic-workbench-v2-before-workbench-upgrade'),JSON.stringify(loaded.data));
   const {tags,...data}=enriched;
   state={...data,canvasItems:data.canvasItems||[],tagDefinitions:tags,selected:new Set(),selectedFrames:new Set(),tags:new Set(),logic:'intersection',mode:'highlight',query:'',tool:'select',detail:null,detailInstance:null,display:'canvas',activeBoard:null,scopeFrame:null,focusDirection:null,deliveryFilter:'active',deliveryQuery:''};
@@ -1452,11 +1457,12 @@ async function boot(){
   const compact=matchMedia('(min-width:761px) and (max-width:1100px)').matches;if(compact)document.body.classList.add('sidebar-collapsed');
   renderAll();setDisplay(state.display);save(loaded.fromStorage&&!loaded.data.frameBoardSyncVersion&&data.quickBoards.some(board=>board.sourceFrameId),{publish:false});
   if (canMaintain()) localStorage.setItem(storageKey('topic-workbench-active-key'),dataKey);
-  showPublicationTime(release);
-  cloudSync?.start();
+  if (!viewingArchive) showPublicationTime(release);
+  if (needsDraftReview) setOnlineSaveStatus('local-draft');
+  else cloudSync?.start();
   refreshSearchMeetings();
-  if (liveEdition) watchWorkspace('board',()=>release.revision,next=>{
-    if (cloudSync && (dirty||document.querySelector(pendingInputs)||!cloudSync.acceptRemote({...next,data:normalizeBoard(next.data)}))) return;
+  if (!viewingArchive) watchWorkspace('board',()=>release.revision,next=>{
+    if (cloudSync && (needsDraftReview||dirty||document.querySelector(pendingInputs)||!cloudSync.acceptRemote({...next,data:normalizeBoard(next.data)}))) return;
     release=asRelease(next);
     updateSharedBoard(release);
     if (canMaintain()) {
@@ -1465,12 +1471,12 @@ async function boot(){
     }
   });
   window.addEventListener('workbench-account-changed',()=>{
-    if (liveEdition && localMaintainer!==canEditWorkspace()) {
+    if (!viewOnline&&(localMaintainer||viewingArchive)!==canEditWorkspace()) {
       cloudSync?.dispose();
       location.reload();
     }
   });
-  showBoardCopies($('settingsDialog').querySelector('.settings-links'),boardPublication);
+  if (canEditWorkspace()) showBoardCopies($('settingsDialog').querySelector('.settings-links'),boardPublication,viewingArchive);
   const linkedProject=new URLSearchParams(location.search).get('project');if(linkedProject&&byId[linkedProject])openDetail(linkedProject);
   $('toggleSidebar').setAttribute('aria-expanded',String(!mobile()&&!compact));
  }catch(error){

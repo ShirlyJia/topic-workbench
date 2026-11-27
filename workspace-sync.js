@@ -72,7 +72,14 @@ export function createWorkspaceSync({kind,release,draftKey,onStatus=()=>{},onSav
         onStatus('conflict','线上已有新版本，草稿已保留');
       } else if (error.status===401 || error.status===403 || error.status===413 || error.status===400) {
         paused=true;
-        onStatus('attention',error.message);
+        // These validation errors reject the write before applying it.
+        // Retrying can submit the corrected draft with a fresh write ID.
+        if (error.status===400 || error.status===413) {
+          queued??=sent.data;
+          ticket=null;
+          saveDraft();
+        }
+        onStatus('attention',error.message,error.status);
       } else {
         wait=Math.min(wait*2,30000);
         onStatus('waiting','等待重新连接，草稿已保留');
