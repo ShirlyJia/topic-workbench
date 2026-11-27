@@ -18,7 +18,7 @@
 .tag-list.tag-sorting .color-control{width:0;flex-basis:0;opacity:0;pointer-events:none}
 
 /* One quiet colour family across filters, cards and historical records. */
-.filter-token,.card-tag,.snapshot-tag{
+.filter-token,.card-tag{
   --tag-ink:color-mix(in srgb,var(--tag-color,#85867f) 34%,#343b38);
   --tag-surface:color-mix(in srgb,var(--tag-color,#85867f) 10%,#fff);
   --tag-border:color-mix(in srgb,var(--tag-color,#85867f) 22%,#fff);
@@ -55,13 +55,12 @@
 .filter-token:has(.tag-name-editor) .color-control,.tag-list.tag-sorting .color-control{opacity:0;pointer-events:none}
 .tag-name-editor{min-height:30px;padding:5px 10px;border-color:var(--tag-color,#9aa99e);border-radius:8px;font-size:11px;line-height:18px;color:var(--tag-ink,#37352f);box-shadow:0 0 0 2px var(--tag-surface,#f3f4f1)}
 
-.card-tag,.snapshot-tag{
+.card-tag{
   display:inline-flex;align-items:center;gap:5px;box-sizing:border-box;min-height:22px;padding:2px 7px;
   border:1px solid var(--tag-border);border-radius:6px;background:var(--tag-surface);color:var(--tag-ink);
   font-size:10.5px;line-height:16px;font-weight:450;vertical-align:middle;
 }
-.card-tag[style*="--tag-color"]::before,.snapshot-tag::before{content:"";flex:0 0 4px;width:4px;height:4px;border-radius:50%;background:var(--tag-color)}
-.snapshot-tag{--tag-color:var(--snapshot-accent,#85867f);margin-bottom:4px}
+.card-tag[style*="--tag-color"]::before{content:"";flex:0 0 4px;width:4px;height:4px;border-radius:50%;background:var(--tag-color)}
 .card-tags{align-items:center}
 .detail-tags .card-tag{position:relative;min-height:27px;padding:3px 7px 3px 23px;gap:5px;font-size:11px;line-height:19px}
 .detail-tags .card-tag::before{display:none}

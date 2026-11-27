@@ -12,14 +12,14 @@
   <link rel="stylesheet" href="rich-text.css?v=20261123-citation-plain">
   <link rel="stylesheet" href="project-flow.css">
   <link rel="stylesheet" href="delivery.css">
-  <link rel="stylesheet" href="workbench.css?v=20261113-comment-pool">
+  <link rel="stylesheet" href="workbench.css?v=20261127-retire-snapshots">
   <link rel="stylesheet" href="canvas-items.css">
   <link rel="stylesheet" href="canvas-references.css?v=20261102-pan-fit"><link rel="stylesheet" href="child-projects.css?v=20261127-frozen-child">
   <link rel="stylesheet" href="workspace-polish.css?v=20261113-comment-pool">
   <link rel="stylesheet" href="detail-panel.css"><link rel="stylesheet" href="canvas-selection.css">
   <link rel="stylesheet" href="color-presets.css?v=20261105-feishu">
   <link rel="stylesheet" href="frame-layers.css">
-  <link rel="stylesheet" href="tag-editor.css?v=20261124-tag-picker">
+  <link rel="stylesheet" href="tag-editor.css?v=20261127-retire-snapshots">
   <link rel="stylesheet" href="direction-focus.css?v=20261030-direction2">
   <link rel="stylesheet" href="project-assignee.css?v=20261126-multi-assignees">
   <link rel="stylesheet" href="card-surfaces.css?v=20261030-two-line-previews">
@@ -32,7 +32,7 @@
   <link rel="stylesheet" href="workspace-account.css?v=20261126-account">
   <link rel="stylesheet" href="signed-comments.css?v=20261126-signed-comments">
   <link rel="stylesheet" href="project-lifecycle.css?v=20261113-frozen-style">
-  <link rel="stylesheet" href="viewer-mode.css?v=20261117">
+  <link rel="stylesheet" href="viewer-mode.css?v=20261127-retire-snapshots">
   <link rel="stylesheet" href="action-board.css?v=20261123-action-focus">
   <link rel="stylesheet" href="global-search.css?v=20261117-mobile">
   <link rel="stylesheet" href="workspace-login.css?v=20261127-login-entry">
@@ -47,7 +47,6 @@
       <button class="sidebar-item active" id="canvasNav" aria-current="page"><span class="nav-symbol">▱</span><span>自由画板</span><small id="totalProjects" title="项目总数">—</small></button>
       <button class="sidebar-item" id="resultsNav"><span class="nav-symbol">◈</span><span>成果与历史</span><small id="resultsCount">0</small></button>
       <button class="sidebar-item" id="deliveryNav"><span class="nav-symbol">◷</span><span>延期记录</span><small id="deliveryCount" class="delivery-nav-count" hidden>0</small></button>
-      <a class="sidebar-item" href="snapshots.html"><span class="nav-symbol">▣</span><span>历史快照</span></a>
       <a class="sidebar-item" href="meetings.html"><span class="nav-symbol">▤</span><span>会议记录</span><small>↗</small></a>
     </nav>
     <nav class="sidebar-section" aria-label="行动看板"><div class="sidebar-label label-actions"><span>行动看板</span><button data-create-board title="新建看板或导入分组" aria-label="新建看板或导入分组">＋</button></div><div id="quickBoardNav"></div></nav>
@@ -64,7 +63,6 @@
       <button type="button" id="saveStatus" class="save-status workspace-save-status" data-save-phase="loading" title="正在载入画板"><span id="saveStatusLabel" aria-live="polite">载入中</span></button>
       <div class="workspace-tools" role="group" aria-label="画板操作">
         <button type="button" id="undo" class="plain-button" title="撤销" aria-label="撤销" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4-4 4 4 4M3 8h9a4 4 0 0 1 0 8H9"/></svg></button>
-        <button type="button" id="snapshots" class="plain-button" title="保存快照" aria-label="保存快照"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5 8.5 3h3L13 5h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/><circle cx="10" cy="10.5" r="2.5"/></svg><span>快照</span></button>
         <button type="button" id="reviewIssues" class="plain-button" title="待核对" aria-label="待核对"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 17V4m0 1c3-3 6 2 10 0v7c-4 2-7-3-10 0"/></svg><span>待核对</span></button>
         <button type="button" id="help" class="plain-button" title="操作说明与快捷键" aria-label="帮助"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M8 8a2 2 0 1 1 3 1.6c-.7.4-1 .9-1 1.9m0 2.6h.01"/></svg></button>
       </div>
@@ -143,7 +141,7 @@
   <dialog id="editorDialog" class="editor-dialog"><form id="editorForm"><header class="editor-head"><h2 id="editorTitle"></h2><button type="button" data-close-editor aria-label="关闭编辑">×</button></header><div id="editorFields"></div><p id="editorError" class="form-error" role="alert" hidden></p><footer class="dialog-actions"><button type="button" data-close-editor>取消</button><button id="editorSubmit" class="primary" type="submit">保存</button></footer></form></dialog>
   <dialog id="tagDialog" class="editor-dialog"><header class="editor-head"><h2>管理分类标签</h2><button id="closeTags" aria-label="关闭标签管理">×</button></header><form id="newTagForm" class="inline-form"><label class="sr-only" for="newTagName">新标签名称</label><input id="newTagName" placeholder="新标签名称" maxlength="40" required><span id="newTagColorControl"></span><button class="primary" type="submit">新增</button></form><div id="tagRows"></div><p class="muted">删除后可用顶部「撤销」恢复。</p></dialog>
   <dialog id="previewDialog" class="preview-dialog"><header class="editor-head"><h2 id="previewTitle">资料</h2><div><a id="previewOriginal" target="_blank" rel="noopener noreferrer">打开原文 ↗</a><button id="closePreview" aria-label="关闭资料预览">×</button></div></header><p class="muted">如受登录或网站限制未能显示，请打开原文查看、编辑。</p><iframe id="previewFrame" title="资料预览" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" referrerpolicy="no-referrer"></iframe></dialog>
-  <dialog id="settingsDialog" class="workspace-settings"><header><h2>数据与备份</h2><button id="closeSettings" aria-label="关闭设置">×</button></header><p>管理员的修改会自动保存到线上，成员登录后可留言。</p><div class="settings-links"><button id="exportData" class="primary">导出备份</button><a href="snapshots.html">查看历史快照 →</a></div></dialog>
+  <dialog id="settingsDialog" class="workspace-settings"><header><h2>数据与备份</h2><button id="closeSettings" aria-label="关闭设置">×</button></header><p>管理员的修改会自动保存到线上，成员登录后可留言。</p><div class="settings-links"><button id="exportData" class="primary">导出备份</button></div></dialog>
   <script type="importmap">
     {
   "imports": {
@@ -172,6 +170,6 @@
 }
   </script>
   <script type="module" src="workspace-account.js?v=20261127-login-entry"></script>
-  <script type="module" src="app.js?v=20261127-login-entry"></script>
+  <script type="module" src="app.js?v=20261127-retire-snapshots"></script>
 </body>
 </html>
