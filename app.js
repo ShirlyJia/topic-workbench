@@ -180,7 +180,7 @@ function cardMarkup(p,{instance,showCategoryTags}){
     '<button type="button" class="card-copy" data-copy-instance="'+esc(instance.id)+'" data-hint="复制到画板" aria-keyshortcuts="Control+D Meta+D" aria-label="复制'+esc(p.name)+'到画板"><svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M13 5V3H3v10h2"/></svg></button>'+
     '<button type="button" class="card-remove-reference" data-remove-instance="'+esc(instance.id)+'" data-hint="移除此处引用" aria-label="移除此处引用"><svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M6.5 10h7" stroke-linecap="round"/></svg></button></div>':'';
   return childBadgeMarkup(children.length,p.id,{expandable,expanded})+(eyebrow||instance?.focus?'<div class="card-eyebrow">'+eyebrow+(instance?.focus?'<span class="focus-mark">★ 本处重点</span>':'')+'</div>':'')+'<div class="card-heading">'+pageIcon+'<h3 class="card-title">'+esc(p.name)+'</h3>'+actions+'<button class="detail-arrow" data-open="'+esc(p.id)+'" aria-label="查看'+esc(p.name)+'详情">↗</button></div>'+
-  parentCardMarkup(p.id,state,{preferredParent:focusedDirection?.rows.find(row=>row.project.id===p.id)?.parent.id})+'<div class="card-tags">'+priorityControl(p,true)+assigneeListMarkup(projectAssignees(p))+categoryTags+'</div>'+
+  parentCardMarkup(p.id,state,{preferredParent:focusedDirection?.rows.find(row=>row.project.id===p.id)?.parent.id})+'<div class="card-tags">'+priorityControl(p,true)+(instance||mobile()?cardTopicDirection(p):'')+assigneeListMarkup(projectAssignees(p))+categoryTags+'</div>'+
   (p.description?'<p class="card-note">'+esc(displayDescription(p.description))+'</p>':'')+
   deliveryCardMarkup(p)+(node?.owner&&!node.targetDate&&!node.estimatedDate?'<div class="card-footer">'+esc(node.owner)+'</div>':'')+
   ((projectInstances(p.id).length>1||instance?.context)?'<div class="card-reference">'+(projectInstances(p.id).length>1?'<span>'+projectInstances(p.id).length+' 处引用</span>':'')+(instance?.context?'<span title="'+esc(instance.context)+'">有本处备注</span>':'')+'</div>':'')+(expanded?childTreeMarkup(children):'');
@@ -311,7 +311,7 @@ function applyFilter(options={}){
   if(!empty.hidden){
     const unusedDirection=state.topicDirection&&!projects.some(project=>project.topicDirection===state.topicDirection);
     empty.querySelector('p').textContent=unusedDirection&&canMaintain()
-      ? '在「全部」里打开项目，可在详情中设置议题方向。'
+      ? '切回「全部」，可在卡片上设置议题方向。'
       : '试试其他议题方向、关键词，或清除筛选。';
   }
   if(!options.keepMain){renderMobile();workbench?.render();}
@@ -687,15 +687,41 @@ function locateDetailProject(pid){
   }
   if(card){card.focus({preventScroll:true});card.classList.add('detail-location-target');setTimeout(()=>card.classList.remove('detail-location-target'),2400);}
 }
+function topicDirectionOptions(value){
+  const selected=topicDirectionLabel(value)?value:'';
+  return [['','未设置'],...topicDirections].map(([key,label])=>
+    '<option value="'+esc(key)+'"'+(key===selected?' selected':'')+'>'+esc(label)+'</option>'
+  ).join('');
+}
+function cardTopicDirection(project){
+  const name=topicDirectionLabel(project.topicDirection);
+  if(!canMaintain())return name?'<span class="card-topic-direction" title="议题方向">'+esc(name)+'</span>':'';
+  return '<span class="card-topic-direction is-editable'+(name?'':' is-unset')+'"><span aria-hidden="true">'+esc(name||'＋ 议题')+'</span>'+
+    '<select data-card-topic-direction="'+esc(project.id)+'" aria-label="议题方向 · '+esc(project.name)+'" title="设置议题方向">'+
+    topicDirectionOptions(project.topicDirection)+'</select></span>';
+}
+function changeCardTopicDirection(control){
+  const pid=control.dataset.cardTopicDirection,value=control.value;
+  const instanceId=control.closest('[data-instance]')?.dataset.instance;
+  const focused=document.activeElement===control;
+  if(!canMaintain()||!flushInline()||!byId[pid]||
+     !mutate(()=>{byId[pid].topicDirection=value;},'',{keepDetail:state.detail!==pid,rollbackOnSaveFailure:true})){
+    if(control.isConnected)control.value=byId[pid]?.topicDirection||'';
+  }
+  if(focused&&instanceId){
+    const card=world.querySelector('[data-instance="'+CSS.escape(instanceId)+'"]');
+    if(card&&!control.isConnected){
+      card.focus({preventScroll:true});
+      card.querySelector('[data-card-topic-direction]')?.focus({preventScroll:true});
+    }
+  }
+}
 function topicDirectionField(project,editable){
   const direction=topicDirectionLabel(project.topicDirection);
   if(!editable){
     return direction?'<span class="topic-direction-field is-readonly"><span>议题方向</span><strong>'+esc(direction)+'</strong></span>':'';
   }
-  const options=[['','未设置'],...topicDirections].map(([key,label])=>
-    '<option value="'+esc(key)+'"'+(key===(direction?project.topicDirection:'')?' selected':'')+'>'+esc(label)+'</option>'
-  ).join('');
-  return '<label class="topic-direction-field"><span>议题方向</span><select data-inline="topicDirection" aria-label="议题方向">'+options+'</select></label>';
+  return '<label class="topic-direction-field"><span>议题方向</span><select data-inline="topicDirection" aria-label="议题方向">'+topicDirectionOptions(project.topicDirection)+'</select></label>';
 }
 function openDetail(pid,instanceId=null,resetScroll=true,{keepTrail=false}={}){
   if(canvasEditor?.clear()===false)return;
@@ -1009,6 +1035,7 @@ function bindInlineEditing(){
   });
   document.addEventListener('change',e=>{
     const el=e.target;
+    if(el.matches('[data-card-topic-direction]')){changeCardTopicDirection(el);return;}
     if(el.matches('[data-priority-editor]')){mutate(()=>byId[el.dataset.priorityEditor].priority=el.value,'',{keepDetail:!!el.closest('#detailBody')});el.dataset.priority=el.value;}
     if(el.matches('[data-frame-color]'))mutate(()=>state.frames.find(f=>f.id===el.dataset.frameColor).backgroundColor=el.value);
     if(el.matches('[data-selected-frame-color]'))mutate(()=>state.frames.filter(f=>state.selectedFrames.has(f.id)).forEach(f=>f.backgroundColor=el.value));

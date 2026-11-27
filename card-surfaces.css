@@ -31,3 +31,28 @@
   .world .project-card:hover{z-index:7}
   .world .project-card.dragging{z-index:8}
 }
+
+.card-topic-direction{
+  position:relative;display:inline-flex;align-items:center;gap:5px;
+  min-height:22px;padding:2px 5px;border-radius:4px;
+  color:#51646f;font-size:11px;line-height:1.4;white-space:nowrap;
+}
+.card-topic-direction.is-unset{color:#77746c}
+.card-topic-direction.is-editable::after{
+  content:"";width:4px;height:4px;border:solid currentColor;border-width:0 1px 1px 0;
+  transform:translateY(-1px) rotate(45deg);opacity:.68;
+}
+.card-topic-direction select{
+  position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;
+}
+.card-topic-direction.is-editable:is(:hover,:focus-within){
+  background:color-mix(in srgb,currentColor 8%,transparent);
+}
+.card-topic-direction:has(select:focus-visible){outline:1px solid #587787;outline-offset:1px}
+@media(hover:hover) and (pointer:fine){
+  .project-card:not(:hover,:focus-within) .card-topic-direction.is-unset{display:none}
+  .project-card:not(:hover,:focus-within) .card-topic-direction.is-editable::after{opacity:0}
+}
+@media(pointer:coarse){
+  .card-topic-direction.is-editable{min-height:30px;padding-inline:8px}
+}
